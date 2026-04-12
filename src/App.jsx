@@ -7,44 +7,45 @@ const supabase = createClient(
 
 // ─── ZONES ────────────────────────────────────────────────────
 const ZONES_DEFAULT = [
-  ...Array.from({length:20},(_,i)=>({id:`mh${i+1}`,name:`Mobile-home ${200+i+1}`,cat:"Hébergement",icon:"🏠"})),
-  {id:"mh_all",name:"Hébergements (général)",cat:"Hébergement",icon:"🏘️"},
+  ...Array.from({length:306},(_,i)=>({id:`mh${i+1}`,name:`Mobile-home ${i+1}`,cat:"Hébergement",icon:"🏠"})),
+  {id:"suite_a",name:"Suite A",cat:"Suites",icon:"⭐"},
+  {id:"suite_b",name:"Suite B",cat:"Suites",icon:"⭐"},
+  {id:"suite_c",name:"Suite C",cat:"Suites",icon:"⭐"},
+  {id:"suite_d",name:"Suite D",cat:"Suites",icon:"⭐"},
   {id:"bar",name:"Bar",cat:"Restauration",icon:"🍺"},
   {id:"cuisine",name:"Cuisine",cat:"Restauration",icon:"👨‍🍳"},
-  {id:"accueil",name:"Accueil",cat:"Bureaux",icon:"🛎️"},
-  {id:"bureau",name:"Bureau",cat:"Bureaux",icon:"💼"},
-  {id:"appart",name:"Appartement direction",cat:"Bureaux",icon:"🏢"},
-  {id:"salle_reunion",name:"Salle de réunion",cat:"Bureaux",icon:"📋"},
-  {id:"suite1",name:"Suite 1",cat:"Suites",icon:"⭐"},
-  {id:"suite2",name:"Suite 2",cat:"Suites",icon:"⭐"},
-  {id:"suite3",name:"Suite 3",cat:"Suites",icon:"⭐"},
-  {id:"suite4",name:"Suite 4",cat:"Suites",icon:"⭐"},
-  {id:"salle_cosy",name:"Petite salle cosy",cat:"Salles",icon:"🕯️"},
-  {id:"grande_salle",name:"Grande salle réception",cat:"Salles",icon:"🎊"},
+  {id:"terrasse",name:"Terrasse",cat:"Restauration",icon:"☀️"},
+  {id:"salle_reception1",name:"Salle de réception 1",cat:"Salles",icon:"🎊"},
+  {id:"salle_reception2",name:"Salle de réception 2",cat:"Salles",icon:"🎊"},
   {id:"boite_nuit",name:"Boîte de nuit",cat:"Salles",icon:"🎵"},
-  {id:"salle_ado",name:"Salle ado",cat:"Salles",icon:"🎮"},
-  {id:"san_pub",name:"Sanitaires publics",cat:"Sanitaires",icon:"🚿"},
-  {id:"san_pmr",name:"Sanitaires PMR",cat:"Sanitaires",icon:"♿"},
-  {id:"wc_piscine",name:"WC piscine",cat:"Sanitaires",icon:"🚽"},
-  {id:"laverie_pub",name:"Laverie publique",cat:"Services",icon:"🧺"},
-  {id:"laverie_nous",name:"Laverie interne",cat:"Services",icon:"🧺"},
+  {id:"salle_ado",name:"Salle ados",cat:"Salles",icon:"🎮"},
+  {id:"accueil",name:"Nouvel accueil",cat:"Bureaux",icon:"🛎️"},
+  {id:"bureau",name:"Bureau",cat:"Bureaux",icon:"💼"},
+  {id:"batiment2",name:"Bâtiment 2",cat:"Bureaux",icon:"🏢"},
+  {id:"batiment3",name:"Bâtiment 3",cat:"Bureaux",icon:"🏢"},
+  {id:"coiffure",name:"Salon de coiffure",cat:"Services",icon:"✂️"},
+  {id:"laverie",name:"Laverie",cat:"Services",icon:"🧺"},
   {id:"local_vaisselle",name:"Local vaisselle",cat:"Services",icon:"🍽️"},
-  {id:"stock1",name:"Stock 1",cat:"Services",icon:"📦"},
-  {id:"stock2",name:"Stock 2",cat:"Services",icon:"📦"},
-  {id:"stock3",name:"Stock 3",cat:"Services",icon:"📦"},
-  {id:"coiffure",name:"Salon coiffure & massage",cat:"Services",icon:"✂️"},
-  {id:"piscine",name:"Piscine",cat:"Piscine",icon:"🏊"},
-  {id:"local_piscine1",name:"Local piscine 1",cat:"Piscine",icon:"🔧"},
-  {id:"local_piscine2",name:"Local piscine 2",cat:"Piscine",icon:"🔧"},
-  {id:"exterieur",name:"Espaces verts / extérieur",cat:"Extérieur",icon:"🌿"},
-  {id:"tennis",name:"Table de tennis",cat:"Extérieur",icon:"🏓"},
-  {id:"voiture1",name:"Voiture 1",cat:"Véhicules",icon:"🚗"},
-  {id:"voiture2",name:"Voiture 2",cat:"Véhicules",icon:"🚗"},
-  {id:"voiture3",name:"Voiture 3",cat:"Véhicules",icon:"🚗"},
-  {id:"golf1",name:"Voiturette golf 1",cat:"Véhicules",icon:"⛳"},
-  {id:"golf2",name:"Voiturette golf 2",cat:"Véhicules",icon:"⛳"},
-  {id:"golf3",name:"Voiturette golf 3",cat:"Véhicules",icon:"⛳"},
-];
+  {id:"fitness",name:"Fitness",cat:"Services",icon:"💪"},
+  {id:"sanitaires",name:"Sanitaires",cat:"Sanitaires",icon:"🚿"},
+  {id:"sanitaires_pmr",name:"Sanitaires handicapés",cat:"Sanitaires",icon:"♿"},
+  {id:"wc_piscine",name:"WC Piscine",cat:"Sanitaires",icon:"🚽"},
+  {id:"piscine",name:"Piscine",cat:"Piscine & Loisirs",icon:"🏊"},
+  {id:"tobogan",name:"Tobogan",cat:"Piscine & Loisirs",icon:"🌊"},
+  {id:"local_tobogan",name:"Local Tobogan",cat:"Piscine & Loisirs",icon:"🔧"},
+  {id:"jeux_enfants",name:"Jeux enfants",cat:"Piscine & Loisirs",icon:"🎠"},
+  {id:"tennis",name:"Tennis",cat:"Sports",icon:"🎾"},
+  {id:"ping_pong",name:"Ping pong",cat:"Sports",icon:"🏓"},
+  {id:"terrain_multi",name:"Terrain multisport",cat:"Sports",icon:"⚽"},
+  {id:"petanque",name:"Pétanque",cat:"Sports",icon:"🎯"},
+  {id:"locaux_tech",name:"Locaux techniques",cat:"Technique",icon:"🔧"},
+  {id:"chateau_eau",name:"Château d'eau",cat:"Technique",icon:"💧"},
+  {id:"station_epuration",name:"Station d'épuration",cat:"Technique",icon:"🏭"},
+  {id:"marre",name:"Mare",cat:"Extérieur",icon:"🦆"},
+  {id:"poubelles",name:"Poubelles",cat:"Extérieur",icon:"🗑️"},
+  {id:"espace_vert",name:"Espace vert",cat:"Extérieur",icon:"🌿"},
+  {id:"autres",name:"Autres",cat:"Extérieur",icon:"📍"},
+]
 
 const ROLES = {
   direction:      {label:"Direction",          color:"#2E7D32", icon:"👑", canCreate:true,  canValidate:true,  canReassign:true,  canManageUsers:true},
@@ -494,22 +495,17 @@ function TaskDetail({task,me,role,users,zones,onSave,onDelete,onBack}){
           {analyzing?"🔍 Analyse en cours…":"📷 Ajouter une photo"}
         </button>}
         {aiResult&&<AIResult r={aiResult} />}
-        {task.photos.length>0&&<>
-          <button onClick={()=>setShowPhotos(!showPhotos)} style={{background:"none",border:"none",color:"#1565C0",fontFamily:"sans-serif",fontSize:12,cursor:"pointer",padding:0,marginBottom:6}}>
-            {showPhotos?"▾ Masquer les photos":"▸ Voir les photos"}
-          </button>
-          {showPhotos&&<div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-            {task.photos.map((p,i)=>(
-              <div key={i} style={{position:"relative"}}>
-                <img src={p.url} alt="" style={{width:88,height:88,objectFit:"cover",borderRadius:8,border:"1px solid #ddd"}} />
-                <div style={{position:"absolute",bottom:0,left:0,right:0,background:"rgba(0,0,0,.55)",color:"#fff",fontSize:8,padding:"2px 3px",borderRadius:"0 0 8px 8px",fontFamily:"sans-serif"}}>
-                  {users.find(u=>u.id===p.by)?.name||"?"} · {new Date(p.date).toLocaleDateString("fr-FR")}
-                </div>
-                {p.analysis?.anomalies?.length>0&&<div style={{position:"absolute",top:2,right:2,background:"#C62828",color:"#fff",borderRadius:4,padding:"1px 4px",fontSize:8,fontFamily:"sans-serif"}}>⚠</div>}
+        {task.photos.length>0&&<div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:6}}>
+          {task.photos.map((p,i)=>(
+            <div key={i} style={{position:"relative"}}>
+              <img src={p.url} alt="" style={{width:100,height:100,objectFit:"cover",borderRadius:8,border:"1px solid #ddd"}} />
+              <div style={{position:"absolute",bottom:0,left:0,right:0,background:"rgba(0,0,0,.6)",color:"#fff",fontSize:8,padding:"2px 3px",borderRadius:"0 0 8px 8px",fontFamily:"sans-serif"}}>
+                {users.find(u=>u.id===p.by)?.name||"?"} · {new Date(p.date).toLocaleDateString("fr-FR")}
               </div>
-            ))}
-          </div>}
-        </>}
+              {p.analysis?.anomalies?.length>0&&<div style={{position:"absolute",top:2,right:2,background:"#C62828",color:"#fff",borderRadius:4,padding:"1px 4px",fontSize:8,fontFamily:"sans-serif"}}>⚠</div>}
+            </div>
+          ))}
+        </div>}
       </Card>
 
       {/* Note */}
