@@ -1,4 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { createClient } from "@supabase/supabase-js";
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_KEY
+);
 
 // ─── ZONES ────────────────────────────────────────────────────
 const ZONES_DEFAULT = [
@@ -56,8 +61,18 @@ const STATUS_COLOR = {"À faire":"#F57F17","En cours":"#1565C0","À valider":"#6
 
 // ─── STORAGE ──────────────────────────────────────────────────
 const db = {
-  async get(k){ try{const r=await window.storage.get(k,true);return r?JSON.parse(r.value):null}catch{return null}},
-  async set(k,v){ try{await window.storage.set(k,JSON.stringify(v),true)}catch(e){console.error(e)}},
+  async get(k){
+    try{
+      const {data,error} = await supabase.from('tasks').select('data').eq('id',k).single();
+      if(error) return null;
+      return data?.data || null;
+    }catch{return null;}
+  },
+  async set(k,v){
+    try{
+      await supabase.from('tasks').upsert({id:k, data:v, updated_at: new Date().toISOString()});
+    }catch(e){console.error(e);}
+  },
 };
 
 // ─── CLAUDE API ───────────────────────────────────────────────
