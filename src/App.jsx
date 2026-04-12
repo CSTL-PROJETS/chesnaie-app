@@ -63,7 +63,7 @@ const STATUS_COLOR = {"À faire":"#F57F17","En cours":"#1565C0","À valider":"#6
 const db = {
   async get(k){
     try{
-      const {data,error} = await supabase.from('tasks').select('data').eq('id',k).single();
+      const {data,error} = await supabase.from('tasks').select('data').eq('id',k).maybeSingle();
       if(error) return null;
       return data?.data || null;
     }catch{return null;}
