@@ -63,7 +63,7 @@ const STATUS_COLOR = {"À faire":"#F57F17","En cours":"#1565C0","À valider":"#6
 const db = {
   async get(k){
     try{
-      const {data,error} = await supabase.from('tasks').select('data').eq('id',k).maybeSingle();
+      const {data,error} = await supabase.from('tasks').select('data').eq('id',k).single();
       if(error) return null;
       return data?.data || null;
     }catch{return null;}
@@ -132,7 +132,7 @@ export default function App(){
   const openTask = (id)=>{ setTaskId(id); setScreen("task"); };
 
   if(!ready) return <Splash />;
-  if(!me)    return <Login users={users} onLogin={setMe} />;
+  if(!me)    return <Login users={users} onLogin={(u)=>{setMe(u);setScreen("home");}} />;
 
   const role = ROLES[me.role];
   const myTasks = tasks.filter(t=>t.assignedTo===me.id && t.status!=="Validée");
