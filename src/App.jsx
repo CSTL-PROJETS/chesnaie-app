@@ -461,6 +461,16 @@ function TaskDetail({task,me,role,users,zones,onSave,onDelete,onBack}){
       {canChangeStatus && task.status==="À faire" && (
         <ActionBtn color="#1565C0" onClick={()=>setStatus("En cours")}>▶ Commencer la tâche</ActionBtn>
       )}
+      {/* Statut visible */}
+      {task.status==="À valider"&&<div style={{background:"#F3E5F5",border:"2px solid #6A1B9A",borderRadius:10,padding:"12px",textAlign:"center"}}>
+        <div style={{fontSize:20,marginBottom:4}}>⏳</div>
+        <div style={{fontFamily:"sans-serif",fontSize:14,fontWeight:"bold",color:"#6A1B9A"}}>En attente de validation</div>
+        <div style={{fontFamily:"sans-serif",fontSize:12,color:"#9E9E9E",marginTop:2}}>La direction va vérifier votre travail</div>
+      </div>}
+      {task.status==="Validée"&&<div style={{background:"#E8F5E9",border:"2px solid #2E7D32",borderRadius:10,padding:"12px",textAlign:"center"}}>
+        <div style={{fontSize:20,marginBottom:4}}>✅</div>
+        <div style={{fontFamily:"sans-serif",fontSize:14,fontWeight:"bold",color:"#2E7D32"}}>Tâche validée !</div>
+      </div>}
       {sendToValidate && (
         <ActionBtn color="#6A1B9A" onClick={()=>setStatus("À valider")}>📤 Envoyer en validation</ActionBtn>
       )}
@@ -491,20 +501,34 @@ function TaskDetail({task,me,role,users,zones,onSave,onDelete,onBack}){
       {/* Photos */}
       <Card title={`📷 Photos (${task.photos.length})`}>
         <input type="file" accept="image/*" capture="environment" ref={fileRef} onChange={handlePhoto} style={{display:"none"}} />
-        {canAddPhoto&&<button onClick={()=>fileRef.current.click()} disabled={analyzing} style={{width:"100%",padding:"10px",border:"1.5px dashed #2E7D32",borderRadius:8,background:analyzing?"#F5F5F5":"#F1F8F1",color:"#2E7D32",fontFamily:"sans-serif",fontSize:13,cursor:"pointer",fontWeight:"bold",marginBottom:8}}>
-          {analyzing?"🔍 Analyse en cours…":"📷 Ajouter une photo"}
+        {canAddPhoto&&<button onClick={()=>fileRef.current.click()} disabled={analyzing} style={{width:"100%",padding:"12px",border:"1.5px dashed #2E7D32",borderRadius:8,background:analyzing?"#F5F5F5":"#F1F8F1",color:"#2E7D32",fontFamily:"sans-serif",fontSize:14,cursor:"pointer",fontWeight:"bold",marginBottom:10}}>
+          {analyzing?"🔍 Analyse IA en cours…":"📷 Prendre / ajouter une photo"}
         </button>}
         {aiResult&&<AIResult r={aiResult} />}
-        {task.photos.length>0&&<div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:6}}>
-          {task.photos.map((p,i)=>(
-            <div key={i} style={{position:"relative"}}>
-              <img src={p.url} alt="" style={{width:100,height:100,objectFit:"cover",borderRadius:8,border:"1px solid #ddd"}} />
-              <div style={{position:"absolute",bottom:0,left:0,right:0,background:"rgba(0,0,0,.6)",color:"#fff",fontSize:8,padding:"2px 3px",borderRadius:"0 0 8px 8px",fontFamily:"sans-serif"}}>
-                {users.find(u=>u.id===p.by)?.name||"?"} · {new Date(p.date).toLocaleDateString("fr-FR")}
+        {task.photos.length===0&&<div style={{textAlign:"center",color:"#BDBDBD",fontFamily:"sans-serif",fontSize:12,padding:"12px 0"}}>Aucune photo ajoutée</div>}
+        {task.photos.length>0&&<div style={{display:"flex",flexDirection:"column",gap:10,marginTop:4}}>
+          {task.photos.map((p,i)=>{
+            const byUser=users.find(u=>u.id===p.by);
+            const isMine=p.by===me.id;
+            const deletePhoto=()=>{
+              if(!confirm("Supprimer cette photo ?")) return;
+              const newPhotos=task.photos.filter((_,idx)=>idx!==i);
+              update({photos:newPhotos},`🗑 Photo supprimée`);
+            };
+            return <div key={i} style={{background:"#F8F9FA",borderRadius:10,padding:"8px",border:"1px solid #E0E0E0"}}>
+              <img src={p.url} alt="" style={{width:"100%",maxHeight:220,objectFit:"cover",borderRadius:8,display:"block"}} />
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:6}}>
+                <div>
+                  <div style={{fontFamily:"sans-serif",fontSize:11,fontWeight:"bold",color:"#424242"}}>{byUser?.name||"?"}</div>
+                  <div style={{fontFamily:"sans-serif",fontSize:10,color:"#9E9E9E"}}>{new Date(p.date).toLocaleString("fr-FR")}</div>
+                </div>
+                {isMine&&task.status!=="Validée"&&<button onClick={deletePhoto} style={{background:"#FFEBEE",border:"none",borderRadius:6,padding:"5px 10px",color:"#C62828",fontFamily:"sans-serif",fontSize:11,cursor:"pointer",fontWeight:"bold"}}>🗑 Supprimer</button>}
               </div>
-              {p.analysis?.anomalies?.length>0&&<div style={{position:"absolute",top:2,right:2,background:"#C62828",color:"#fff",borderRadius:4,padding:"1px 4px",fontSize:8,fontFamily:"sans-serif"}}>⚠</div>}
-            </div>
-          ))}
+              {p.analysis&&p.analysis.anomalies&&p.analysis.anomalies.length>0&&<div style={{marginTop:6,background:"#FFF8E1",borderRadius:6,padding:"6px 8px",fontFamily:"sans-serif",fontSize:11,color:"#E65100"}}>
+                ⚠ {p.analysis.anomalies.join(" · ")}
+              </div>}
+            </div>;
+          })}
         </div>}
       </Card>
 
