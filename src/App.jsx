@@ -52,11 +52,12 @@ const ROLES = {
   qualite:        {label:"Contrôle qualité",   color:"#1565C0", icon:"🔍", canCreate:true,  canValidate:true,  canReassign:true,  canManageUsers:false},
   ctrl_technique: {label:"Contrôle technique", color:"#BF360C", icon:"🛠️", canCreate:true,  canValidate:true,  canReassign:true,  canManageUsers:false},
   technique:      {label:"Technique",          color:"#E65100", icon:"🔧", canCreate:true,  canValidate:false, canReassign:false, canManageUsers:false},
-  menage:         {label:"Ménage",             color:"#6A1B9A", icon:"🧹", canCreate:false, canValidate:false, canReassign:false, canManageUsers:false},
+  menage:         {label:"Ménage",             color:"#6A1B9A", icon:"🧹", canCreate:true,  canValidate:false, canReassign:false, canManageUsers:false},
   accueil:        {label:"Accueil",            color:"#00838F", icon:"🛎️", canCreate:true,  canValidate:false, canReassign:false, canManageUsers:false},
 };
 
 const WORKFLOW = ["À faire","En cours","À valider","Validée","Renvoyée"];
+const TASK_TYPES = ["Entretien","Voitures","Relevés","Livraison","Terrasse","Électricité","Plomberie","Béton","Taille","Peinture","Lumière","Linge","Dalle","Nettoyage ext.","Fuite","Électroménager","Calage","Sortie d'hivernage","Technique","Clim","Ménage","Hivernage","Autre"];
 const PRIO_COLOR = {Urgente:"#C62828",Haute:"#E65100",Normale:"#1565C0",Basse:"#5D4037"};
 const STATUS_COLOR = {"À faire":"#F57F17","En cours":"#1565C0","À valider":"#6A1B9A","Validée":"#2E7D32","Renvoyée":"#C62828"};
 
@@ -312,6 +313,7 @@ function ToValidate({me,tasks,users,zones,onOpen,onBack}){
 // ─── NEW TASK ─────────────────────────────────────────────────
 function NewTask({me,role,users,zones,onSave,onBack}){
   const [title,setTitle]=useState("");
+  const [taskType,setTaskType]=useState("");
   const [zoneId,setZoneId]=useState("");
   const [priority,setPriority]=useState("Normale");
   const [assignedTo,setAssignedTo]=useState("");
@@ -324,7 +326,7 @@ function NewTask({me,role,users,zones,onSave,onBack}){
     if(!title||!zoneId) return;
     onSave({
       id:Date.now().toString(36),
-      title,zoneId,priority,desc,
+      title,taskType,zoneId,priority,desc,
       assignedTo:assignedTo||me.id,
       createdBy:me.id,
       status:"À faire",
@@ -339,6 +341,12 @@ function NewTask({me,role,users,zones,onSave,onBack}){
     <TopBar title="Nouvelle tâche" onBack={onBack} />
     <div style={{padding:"12px",display:"flex",flexDirection:"column",gap:14}}>
       <F label="Titre *"><input value={title} onChange={e=>setTitle(e.target.value)} placeholder="Ex : Réception TV défaillante" style={IS} /></F>
+      <F label="Type de tâche">
+        <select value={taskType} onChange={e=>setTaskType(e.target.value)} style={IS}>
+          <option value="">-- Choisir un type --</option>
+          {TASK_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
+        </select>
+      </F>
       <F label="Zone *">
         <div style={{display:"flex",gap:5,overflowX:"auto",marginBottom:6,paddingBottom:2}}>
           {cats.map(c=><FilterChip key={c} small label={c} active={catFilter===c} color="#2E7D32" onClick={()=>setCatFilter(c)} />)}
@@ -377,7 +385,7 @@ function TaskDetail({task,me,role,users,zones,onSave,onDelete,onBack}){
   const [reassignTo,setReassignTo]=useState("");
   const [analyzing,setAnalyzing]=useState(false);
   const [aiResult,setAiResult]=useState(null);
-  const [showPhotos,setShowPhotos]=useState(false);
+  const [localPhotos,setLocalPhotos]=useState(task.photos||[]);
   const fileRef=useRef();
   const assignee=users.find(u=>u.id===task.assignedTo);
   const creator=users.find(u=>u.id===task.createdBy);
@@ -386,6 +394,7 @@ function TaskDetail({task,me,role,users,zones,onSave,onDelete,onBack}){
   const update=(patch,histAction)=>{
     const u={...task,...patch,updatedAt:new Date().toISOString(),
       history:[...task.history,{date:new Date().toISOString(),by:me.id,action:histAction}]};
+    if(patch.photos) setLocalPhotos(patch.photos);
     onSave(u);
   };
 
@@ -422,7 +431,8 @@ function TaskDetail({task,me,role,users,zones,onSave,onDelete,onBack}){
         const r=await analyzePhoto(b64,zone?.name||task.zoneId);
         setAiResult(r);
         const p={date:new Date().toISOString(),url:ev.target.result,by:me.id,analysis:r};
-        const newPhotos=[...task.photos,p];
+        const newPhotos=[...localPhotos,p];
+        setLocalPhotos(newPhotos);
         const histAction=`📷 Photo ajoutée — IA: ${r.resume}${r.anomalies.length>0?" — ⚠️"+r.anomalies[0]:""}`;
         const patch={photos:newPhotos};
         if((r.priorite==="Urgente"||r.priorite==="Haute")&&task.priority==="Normale") patch.priority=r.priorite;
@@ -436,7 +446,7 @@ function TaskDetail({task,me,role,users,zones,onSave,onDelete,onBack}){
   const canChangeStatus = isMe;
   const canValidateTask = role.canValidate && task.status==="À valider";
   const canReassign = role.canReassign;
-  const sendToValidate = isMe && task.status==="En cours";
+  const sendToValidate = isMe && (task.status==="En cours" || task.status==="À faire");
 
   return <div style={{paddingBottom:20}}>
     <TopBar title="Détail de la tâche" onBack={onBack} />
@@ -445,7 +455,7 @@ function TaskDetail({task,me,role,users,zones,onSave,onDelete,onBack}){
       {/* Info principale */}
       <Card>
         <div style={{fontSize:17,fontWeight:"bold",color:"#1A1A1A",marginBottom:4}}>{task.title}</div>
-        <div style={{fontFamily:"sans-serif",fontSize:12,color:"#757575",marginBottom:8}}>{zone?.icon} {zone?.name} · {zone?.cat}</div>
+        <div style={{fontFamily:"sans-serif",fontSize:12,color:"#757575",marginBottom:8}}>{zone?.icon} {zone?.name} · {zone?.cat}{task.taskType&&<span style={{marginLeft:8,background:"#E3F2FD",color:"#1565C0",borderRadius:4,padding:"1px 6px",fontWeight:"bold"}}>{task.taskType}</span>}</div>
         <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
           <Tag bg={PRIO_COLOR[task.priority]||"#555"} label={task.priority} />
           <Tag bg={STATUS_COLOR[task.status]||"#555"} label={task.status} />
@@ -499,20 +509,21 @@ function TaskDetail({task,me,role,users,zones,onSave,onDelete,onBack}){
       </Card>}
 
       {/* Photos */}
-      <Card title={`📷 Photos (${task.photos.length})`}>
+      <Card title={`📷 Photos (${localPhotos.length})`}>
         <input type="file" accept="image/*" capture="environment" ref={fileRef} onChange={handlePhoto} style={{display:"none"}} />
         {canAddPhoto&&<button onClick={()=>fileRef.current.click()} disabled={analyzing} style={{width:"100%",padding:"12px",border:"1.5px dashed #2E7D32",borderRadius:8,background:analyzing?"#F5F5F5":"#F1F8F1",color:"#2E7D32",fontFamily:"sans-serif",fontSize:14,cursor:"pointer",fontWeight:"bold",marginBottom:10}}>
           {analyzing?"🔍 Analyse IA en cours…":"📷 Prendre / ajouter une photo"}
         </button>}
         {aiResult&&<AIResult r={aiResult} />}
-        {task.photos.length===0&&<div style={{textAlign:"center",color:"#BDBDBD",fontFamily:"sans-serif",fontSize:12,padding:"12px 0"}}>Aucune photo ajoutée</div>}
-        {task.photos.length>0&&<div style={{display:"flex",flexDirection:"column",gap:10,marginTop:4}}>
-          {task.photos.map((p,i)=>{
+        {localPhotos.length===0&&<div style={{textAlign:"center",color:"#BDBDBD",fontFamily:"sans-serif",fontSize:12,padding:"12px 0"}}>Aucune photo ajoutée</div>}
+        {localPhotos.length>0&&<div style={{display:"flex",flexDirection:"column",gap:10,marginTop:4}}>
+          {localPhotos.map((p,i)=>{
             const byUser=users.find(u=>u.id===p.by);
             const isMine=p.by===me.id;
             const deletePhoto=()=>{
               if(!confirm("Supprimer cette photo ?")) return;
-              const newPhotos=task.photos.filter((_,idx)=>idx!==i);
+              const newPhotos=localPhotos.filter((_,idx)=>idx!==i);
+              setLocalPhotos(newPhotos);
               update({photos:newPhotos},`🗑 Photo supprimée`);
             };
             return <div key={i} style={{background:"#F8F9FA",borderRadius:10,padding:"8px",border:"1px solid #E0E0E0"}}>
