@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
+
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
   import.meta.env.VITE_SUPABASE_KEY
@@ -45,190 +46,199 @@ const ZONES_DEFAULT = [
   {id:"poubelles",name:"Poubelles",cat:"Extérieur",icon:"🗑️"},
   {id:"espace_vert",name:"Espace vert",cat:"Extérieur",icon:"🌿"},
   {id:"autres",name:"Autres",cat:"Extérieur",icon:"📍"},
-]
+];
 
 const ROLES = {
-  direction:      {label:"Direction",          color:"#2E7D32", icon:"👑", canCreate:true,  canValidate:true,  canReassign:true,  canManageUsers:true},
-  qualite:        {label:"Contrôle qualité",   color:"#1565C0", icon:"🔍", canCreate:true,  canValidate:true,  canReassign:true,  canManageUsers:false},
-  ctrl_technique: {label:"Contrôle technique", color:"#BF360C", icon:"🛠️", canCreate:true,  canValidate:true,  canReassign:true,  canManageUsers:false},
-  technique:      {label:"Technique",          color:"#E65100", icon:"🔧", canCreate:true,  canValidate:false, canReassign:false, canManageUsers:false},
-  menage:         {label:"Ménage",             color:"#6A1B9A", icon:"🧹", canCreate:true,  canValidate:false, canReassign:false, canManageUsers:false},
-  accueil:        {label:"Accueil",            color:"#00838F", icon:"🛎️", canCreate:true,  canValidate:false, canReassign:false, canManageUsers:false},
+  direction:      {label:"Direction",           color:"#2E7D32", icon:"👑", canCreate:true, canValidate:true,  canReassign:true,  canManageUsers:true,  seeAll:true},
+  qualite:        {label:"Contrôle qualité",    color:"#1565C0", icon:"🔍", canCreate:true, canValidate:true,  canReassign:true,  canManageUsers:false, seeAll:true},
+  ctrl_technique: {label:"Contrôle technique",  color:"#BF360C", icon:"🛠️", canCreate:true, canValidate:true,  canReassign:true,  canManageUsers:false, seeAll:true},
+  technique:      {label:"Technique",           color:"#E65100", icon:"🔧", canCreate:true, canValidate:false, canReassign:false, canManageUsers:false, seeAll:false},
+  menage:         {label:"Ménage",              color:"#6A1B9A", icon:"🧹", canCreate:true, canValidate:false, canReassign:false, canManageUsers:false, seeAll:false},
+  accueil:        {label:"Accueil",             color:"#00838F", icon:"🛎️", canCreate:true, canValidate:false, canReassign:false, canManageUsers:false, seeAll:false},
 };
 
-const WORKFLOW = ["À faire","En cours","À valider","Validée","Renvoyée"];
+const WORKFLOW   = ["À faire","En cours","À valider","Validée","Renvoyée"];
 const TASK_TYPES = ["Entretien","Voitures","Relevés","Livraison","Terrasse","Électricité","Plomberie","Béton","Taille","Peinture","Lumière","Linge","Dalle","Nettoyage ext.","Fuite","Électroménager","Calage","Sortie d'hivernage","Technique","Clim","Ménage","Hivernage","Autre"];
-const PRIO_COLOR = {Urgente:"#C62828",Haute:"#E65100",Normale:"#1565C0",Basse:"#5D4037"};
-const STATUS_COLOR = {"À faire":"#F57F17","En cours":"#1565C0","À valider":"#6A1B9A","Validée":"#2E7D32","Renvoyée":"#C62828"};
+const PRIO_COLOR  = {Urgente:"#C62828",Haute:"#E65100",Normale:"#1565C0",Basse:"#5D4037"};
+const STATUS_COLOR= {"À faire":"#F57F17","En cours":"#1565C0","À valider":"#6A1B9A","Validée":"#2E7D32","Renvoyée":"#C62828"};
+
+// ─── COMPRESSION PHOTO ────────────────────────────────────────
+// Réduit la photo à 800px max et qualité 0.65 → ~80-150 Ko
+function compressImage(file) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 800;
+        let w = img.width, h = img.height;
+        if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
+        if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; }
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", 0.65));
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
 // ─── NOTIFICATIONS ────────────────────────────────────────────
-function requestNotifPermission(){ 
-  if("Notification" in window && Notification.permission==="default") 
-    Notification.requestPermission(); 
-}
-function sendNotif(title, body){ 
-  if("Notification" in window && Notification.permission==="granted")
-    new Notification(title, {body, icon:"🏕️"}); 
-}
+function askNotif(){ if("Notification" in window && Notification.permission==="default") Notification.requestPermission(); }
+function notif(title,body){ if("Notification" in window && Notification.permission==="granted") new Notification(title,{body}); }
 
-// ─── STORAGE ──────────────────────────────────────────────────
+// ─── SUPABASE DB ──────────────────────────────────────────────
 const db = {
   async get(k){
     try{
-      const {data,error} = await supabase.from('tasks').select('data').eq('id',k).single();
-      if(error) return null;
-      return data?.data || null;
-    }catch{return null;}
+      const {data,error} = await supabase.from("tasks").select("data").eq("id",k).maybeSingle();
+      if(error||!data) return null;
+      return data.data;
+    }catch{ return null; }
   },
   async set(k,v){
-    try{
-      await supabase.from('tasks').upsert({id:k, data:v, updated_at: new Date().toISOString()});
-    }catch(e){console.error(e);}
+    try{ await supabase.from("tasks").upsert({id:k, data:v, updated_at:new Date().toISOString()}); }
+    catch(e){ console.error(e); }
   },
 };
 
-// ─── CLAUDE API ───────────────────────────────────────────────
+// ─── ANALYSE IA ───────────────────────────────────────────────
 async function analyzePhoto(base64, zoneName){
-  const res = await fetch("https://api.anthropic.com/v1/messages",{
-    method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({
-      model:"claude-sonnet-4-20250514",max_tokens:600,
-      messages:[{role:"user",content:[
-        {type:"image",source:{type:"base64",media_type:"image/jpeg",data:base64}},
-        {type:"text",text:`Analyse qualité pour camping 4★ — zone : ${zoneName}.
-Réponds UNIQUEMENT en JSON sans backticks :
-{"anomalies":["max 3 problèmes"],"priorite":"Urgente|Haute|Normale|Basse","resume":"1 phrase","action":"1 phrase"}
-Si RAS : anomalies=[], priorite="Basse", resume="État satisfaisant"`}
-      ]}]
-    })
-  });
-  const d = await res.json();
-  const txt = d.content?.map(c=>c.text||"").join("")||"{}";
-  try{return JSON.parse(txt.replace(/```json|```/g,"").trim());}
-  catch{return {anomalies:[],priorite:"Normale",resume:"Analyse indisponible",action:""};}
+  try{
+    const res = await fetch("https://api.anthropic.com/v1/messages",{
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({
+        model:"claude-sonnet-4-20250514", max_tokens:400,
+        messages:[{role:"user",content:[
+          {type:"image",source:{type:"base64",media_type:"image/jpeg",data:base64}},
+          {type:"text",text:`Analyse qualité camping 4★ — zone : ${zoneName}. JSON uniquement sans backticks : {"anomalies":["max 2"],"priorite":"Urgente|Haute|Normale|Basse","resume":"1 phrase"} Si RAS : anomalies=[],priorite="Basse",resume="État satisfaisant"`}
+        ]}]
+      })
+    });
+    const d = await res.json();
+    const txt = d.content?.map(c=>c.text||"").join("")||"{}";
+    return JSON.parse(txt.replace(/```json|```/g,"").trim());
+  }catch{ return {anomalies:[],priorite:"Normale",resume:"Analyse indisponible"}; }
 }
 
-// ─── ROOT APP ─────────────────────────────────────────────────
+// ─── APP ROOT ─────────────────────────────────────────────────
 export default function App(){
-  const [users, setUsers]       = useState([]);
-  const [tasks, setTasks]       = useState([]);
-  const [me, setMe]             = useState(null); // current user
-  const [ready, setReady]       = useState(false);
-  const [screen, setScreen]     = useState("login");
-  const [taskId, setTaskId]     = useState(null);
+  const [users,  setUsers]  = useState([]);
+  const [tasks,  setTasks]  = useState([]);
+  const [me,     setMe]     = useState(null);
+  const [ready,  setReady]  = useState(false);
+  const [screen, setScreen] = useState("login");
+  const [taskId, setTaskId] = useState(null);
 
-  // Load shared data
   useEffect(()=>{
     (async()=>{
       let u = await db.get("users_v1");
       const t = await db.get("tasks_v1");
-      // Migration : si ancien compte avec PIN "1234", on remet sans PIN
-      if(u && u.some(x=>x.pin==="1234")){
-        u = u.map(x=>({...x,pin:x.pin==="1234"?"":x.pin}));
+      if(!u){
+        u = [{id:"u0",name:"Céline",role:"direction",pin:""}];
         await db.set("users_v1",u);
       }
-      if(u) setUsers(u);
-      else {
-        const seed = [{id:"u0",name:"Céline",role:"direction",pin:""}];
-        await db.set("users_v1",seed);
-        setUsers(seed);
-      }
+      setUsers(u);
       if(t) setTasks(t);
       setReady(true);
     })();
   },[]);
 
   const saveUsers = async(u)=>{ setUsers(u); await db.set("users_v1",u); };
-  const saveTasks = async(t,newTask)=>{ 
-    setTasks(t); 
-    await db.set("tasks_v1",t); 
-    if(newTask) sendNotif("🏕️ Nouvelle tâche", `${newTask.title} — assignée à ${users.find(u=>u.id===newTask.assignedTo)?.name||"vous"}`);
+  const saveTasks = async(t,newT)=>{
+    setTasks(t);
+    await db.set("tasks_v1",t);
+    if(newT){
+      const who = users.find(u=>u.id===newT.assignedTo)?.name||"vous";
+      notif("🏕️ Nouvelle tâche",`${newT.title} — assignée à ${who}`);
+    }
   };
 
   const openTask = (id)=>{ setTaskId(id); setScreen("task"); };
 
   if(!ready) return <Splash />;
-  if(!me)    return <Login users={users} onLogin={(u)=>{setMe(u);setScreen("home");}} />;
+  if(!me)    return <Login users={users} onLogin={(u)=>{ askNotif(); setMe(u); setScreen("home"); }} />;
 
-  const role = ROLES[me.role];
-  const myTasks = tasks.filter(t=>t.assignedTo===me.id && t.status!=="Validée");
-  const toValidate = tasks.filter(t=>t.status==="À valider");
+  const role        = ROLES[me.role] || ROLES.accueil;
+  const myTasks     = tasks.filter(t=>t.assignedTo===me.id);
+  const toValidate  = tasks.filter(t=>t.status==="À valider");
   const currentTask = tasks.find(t=>t.id===taskId);
 
   return (
     <Shell>
-      {screen==="home"    && <Home me={me} role={role} tasks={tasks} myTasks={myTasks} toValidate={toValidate} users={users} onOpen={openTask} onNav={setScreen} />}
-      {screen==="mytasks" && <MyTasks me={me} role={role} tasks={myTasks} users={users} onOpen={openTask} onBack={()=>setScreen("home")} />}
-      {screen==="all"     && <AllTasks me={me} role={role} tasks={tasks} users={users} zones={ZONES_DEFAULT} onOpen={openTask} onBack={()=>setScreen("home")} />}
-      {screen==="validate"&& <ToValidate me={me} tasks={toValidate} users={users} zones={ZONES_DEFAULT} onOpen={openTask} onBack={()=>setScreen("home")} />}
-      {screen==="new"     && <NewTask me={me} role={role} users={users} zones={ZONES_DEFAULT} onSave={async(t)=>{const u=[t,...tasks];await saveTasks(u,t);setScreen("home");}} onBack={()=>setScreen("home")} />}
-      {screen==="task" && currentTask && <TaskDetail task={currentTask} me={me} role={role} users={users} zones={ZONES_DEFAULT} onSave={async(t)=>{const u=tasks.map(x=>x.id===t.id?t:x);await saveTasks(u);}} onDelete={async()=>{const u=tasks.filter(x=>x.id!==currentTask.id);await saveTasks(u);setScreen("home");}} onBack={()=>setScreen("home")} />}
-      {screen==="people"  && <People me={me} role={role} users={users} onSave={saveUsers} onBack={()=>setScreen("home")} />}
-      {screen==="profile" && <Profile me={me} onLogout={()=>setMe(null)} onBack={()=>setScreen("home")} />}
-      {screen==="home" || screen==="mytasks" || screen==="all" || screen==="validate" ? 
-        <BottomNav screen={screen} me={me} role={role} toValidate={toValidate.length} myTasks={myTasks.length} onNav={setScreen} /> : null}
+      {screen==="home"     && <Home     me={me} role={role} tasks={tasks} myTasks={myTasks} toValidate={toValidate} users={users} onOpen={openTask} onNav={setScreen} />}
+      {screen==="mytasks"  && <MyTasks  me={me} role={role} tasks={myTasks} users={users} onOpen={openTask} onBack={()=>setScreen("home")} />}
+      {screen==="all"      && role.seeAll && <AllTasks me={me} role={role} tasks={tasks} users={users} onOpen={openTask} onBack={()=>setScreen("home")} />}
+      {screen==="validate" && role.canValidate && <ToValidate tasks={toValidate} users={users} onOpen={openTask} onBack={()=>setScreen("home")} />}
+      {screen==="new"      && <NewTask  me={me} role={role} users={users} zones={ZONES_DEFAULT} onSave={async(t)=>{await saveTasks([t,...tasks],t);setScreen("home");}} onBack={()=>setScreen("home")} />}
+      {screen==="task" && currentTask &&
+        <TaskDetail
+          task={currentTask} me={me} role={role} users={users} zones={ZONES_DEFAULT}
+          onSave={async(t)=>{ await saveTasks(tasks.map(x=>x.id===t.id?t:x)); }}
+          onDelete={async()=>{ await saveTasks(tasks.filter(x=>x.id!==currentTask.id)); setScreen("home"); }}
+          onBack={()=>setScreen("home")}
+        />}
+      {screen==="people"  && role.canManageUsers && <People me={me} users={users} onSave={saveUsers} onBack={()=>setScreen("home")} />}
+      {screen==="profile" && <Profile me={me} onLogout={()=>{ setMe(null); setScreen("login"); }} onBack={()=>setScreen("home")} />}
+      <BottomNav screen={screen} role={role} toValidate={toValidate.length} myTasks={myTasks.filter(t=>t.status!=="Validée").length} onNav={setScreen} />
     </Shell>
   );
 }
 
 // ─── SPLASH ───────────────────────────────────────────────────
 function Splash(){
-  return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#F8F9FA",fontFamily:"Georgia,serif",color:"#2E7D32",fontSize:18,flexDirection:"column",gap:8}}>
-    <div style={{fontSize:32}}>🏕️</div>
-    <div>Parc de la Chesnaie</div>
+  return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",flexDirection:"column",gap:10,background:"#F8F9FA",fontFamily:"Georgia,serif",color:"#2E7D32"}}>
+    <div style={{fontSize:40}}>🏕️</div>
+    <div style={{fontSize:20}}>Parc de la Chesnaie</div>
     <div style={{fontSize:12,color:"#9E9E9E",fontFamily:"sans-serif"}}>Chargement…</div>
   </div>;
 }
 
 // ─── LOGIN ────────────────────────────────────────────────────
 function Login({users,onLogin}){
-  const [step,setStep]=useState("choose"); // choose|pin
-  const [selected,setSelected]=useState(null);
-  const [pin,setPin]=useState("");
-  const [err,setErr]=useState("");
+  const [sel,setSel]   = useState(null);
+  const [pin,setPin]   = useState("");
+  const [err,setErr]   = useState("");
 
-  const choose=(u)=>{
-    requestNotifPermission();
-    if(!u.pin){onLogin(u);return;}  // Pas de PIN → connexion directe
-    setSelected(u);
-    setPin("");setErr("");
-    setStep("pin");
+  const choose = (u)=>{
+    if(!u.pin){ onLogin(u); return; }
+    setSel(u); setPin(""); setErr("");
   };
-  const confirm=()=>{
-    if(selected.pin && pin!==selected.pin){setErr("Code incorrect");return;}
-    onLogin(selected);
+  const confirm = ()=>{
+    if(pin !== sel.pin){ setErr("Code incorrect"); return; }
+    onLogin(sel);
   };
 
   return (
     <div style={{minHeight:"100vh",background:"#F8F9FA",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:20}}>
-      <div style={{fontSize:40,marginBottom:8}}>🏕️</div>
+      <div style={{fontSize:44,marginBottom:8}}>🏕️</div>
       <div style={{fontFamily:"Georgia,serif",fontSize:22,color:"#2E7D32",marginBottom:4}}>Parc de la Chesnaie</div>
       <div style={{fontFamily:"sans-serif",fontSize:13,color:"#9E9E9E",marginBottom:28}}>Qui êtes-vous ?</div>
-      {step==="choose" && (
+
+      {!sel ? (
         <div style={{width:"100%",maxWidth:360,display:"flex",flexDirection:"column",gap:8}}>
           {users.map(u=>{
-            const r=ROLES[u.role];
+            const r = ROLES[u.role];
             return <button key={u.id} onClick={()=>choose(u)} style={{background:"#fff",border:"2px solid #E0E0E0",borderRadius:12,padding:"14px 16px",cursor:"pointer",display:"flex",alignItems:"center",gap:12,textAlign:"left"}}>
               <div style={{width:42,height:42,borderRadius:"50%",background:r?.color||"#9E9E9E",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>{r?.icon||"👤"}</div>
               <div>
                 <div style={{fontFamily:"Georgia,serif",fontSize:16,color:"#1A1A1A"}}>{u.name}</div>
-                <div style={{fontFamily:"sans-serif",fontSize:12,color:"#9E9E9E"}}>{r?.label||u.role}</div>
+                <div style={{fontFamily:"sans-serif",fontSize:12,color:"#9E9E9E"}}>{r?.label}</div>
               </div>
             </button>;
           })}
         </div>
-      )}
-      {step==="pin" && selected && (
+      ) : (
         <div style={{width:"100%",maxWidth:320,display:"flex",flexDirection:"column",gap:12,alignItems:"center"}}>
-          <div style={{fontFamily:"sans-serif",fontSize:14,color:"#424242"}}>Bonjour {selected.name} — {selected.pin?"Entrez votre code PIN":"Appuyez sur Continuer"}</div>
-          {selected.pin && <>
-            <input type="password" inputMode="numeric" maxLength={6} value={pin} onChange={e=>setPin(e.target.value)} placeholder="Code PIN" style={{width:"100%",border:"2px solid #ddd",borderRadius:10,padding:"12px",fontSize:18,textAlign:"center",letterSpacing:8,fontFamily:"sans-serif",boxSizing:"border-box"}} onKeyDown={e=>e.key==="Enter"&&confirm()} autoFocus />
-            {err && <div style={{color:"#C62828",fontFamily:"sans-serif",fontSize:13}}>{err}</div>}
-          </>}
-          <button onClick={confirm} style={{width:"100%",background:"#2E7D32",color:"#fff",border:"none",borderRadius:10,padding:"14px",fontSize:15,fontFamily:"sans-serif",fontWeight:"bold",cursor:"pointer"}}>
-            Connexion
-          </button>
-          <button onClick={()=>setStep("choose")} style={{background:"none",border:"none",color:"#9E9E9E",fontFamily:"sans-serif",fontSize:13,cursor:"pointer"}}>← Retour</button>
+          <div style={{fontFamily:"sans-serif",fontSize:14,color:"#424242"}}>Bonjour {sel.name} — entrez votre PIN</div>
+          <input type="password" inputMode="numeric" maxLength={6} value={pin} onChange={e=>setPin(e.target.value)}
+            placeholder="Code PIN" autoFocus onKeyDown={e=>e.key==="Enter"&&confirm()}
+            style={{width:"100%",border:"2px solid #ddd",borderRadius:10,padding:"12px",fontSize:22,textAlign:"center",letterSpacing:10,fontFamily:"sans-serif",boxSizing:"border-box"}} />
+          {err&&<div style={{color:"#C62828",fontFamily:"sans-serif",fontSize:13}}>{err}</div>}
+          <button onClick={confirm} style={{width:"100%",background:"#2E7D32",color:"#fff",border:"none",borderRadius:10,padding:"14px",fontSize:15,fontFamily:"sans-serif",fontWeight:"bold",cursor:"pointer"}}>Connexion</button>
+          <button onClick={()=>setSel(null)} style={{background:"none",border:"none",color:"#9E9E9E",fontFamily:"sans-serif",fontSize:13,cursor:"pointer"}}>← Retour</button>
         </div>
       )}
     </div>
@@ -237,343 +247,365 @@ function Login({users,onLogin}){
 
 // ─── HOME ─────────────────────────────────────────────────────
 function Home({me,role,tasks,myTasks,toValidate,users,onOpen,onNav}){
-  const urgentes=tasks.filter(t=>t.priority==="Urgente"&&t.status!=="Validée");
-  const renvoyes=tasks.filter(t=>t.status==="Renvoyée"&&t.assignedTo===me.id);
+  const urgentes = tasks.filter(t=>t.priority==="Urgente"&&t.status!=="Validée");
+  const renvoyes = myTasks.filter(t=>t.status==="Renvoyée");
+  const actives  = myTasks.filter(t=>t.status!=="Validée");
+
   return <div style={{paddingBottom:72}}>
-    {/* Header */}
     <div style={{background:role.color,color:"#fff",padding:"18px 16px 14px"}}>
       <div style={{fontSize:11,opacity:.7,fontFamily:"sans-serif"}}>Parc de la Chesnaie</div>
       <div style={{fontSize:21,fontWeight:"bold"}}>Bonjour, {me.name} {role.icon}</div>
-      <div style={{fontSize:12,opacity:.7,fontFamily:"sans-serif",marginTop:2}}>
-        {new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}
-      </div>
+      <div style={{fontSize:12,opacity:.7,fontFamily:"sans-serif",marginTop:2}}>{new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}</div>
     </div>
+
     <div style={{padding:"12px"}}>
-      {/* Renvoyées à moi */}
-      {renvoyes.length>0&&<AlertBanner color="#C62828" bg="#FFEBEE" icon="🔄" label={`${renvoyes.length} tâche${renvoyes.length>1?"s":""} renvoyée${renvoyes.length>1?"s":""} vers vous`} items={renvoyes} users={users} onOpen={onOpen} />}
-      {/* Urgentes */}
-      {urgentes.length>0&&<AlertBanner color="#C62828" bg="#FFEBEE" icon="🚨" label={`${urgentes.length} urgente${urgentes.length>1?"s":""}`} items={urgentes.slice(0,3)} users={users} onOpen={onOpen} />}
-      {/* À valider */}
-      {role.canValidate&&toValidate.length>0&&<AlertBanner color="#6A1B9A" bg="#F3E5F5" icon="🔍" label={`${toValidate.length} en attente de validation`} items={[]} users={users} onOpen={()=>onNav("validate")} isButton />}
-      {/* Stats */}
+      {renvoyes.length>0&&<Banner color="#C62828" bg="#FFEBEE" icon="🔄" text={`${renvoyes.length} tâche(s) renvoyée(s) vers vous`} onClick={()=>onNav("mytasks")} />}
+      {role.canValidate&&toValidate.length>0&&<Banner color="#6A1B9A" bg="#F3E5F5" icon="🔍" text={`${toValidate.length} en attente de validation`} onClick={()=>onNav("validate")} />}
+      {urgentes.length>0&&<Banner color="#C62828" bg="#FFEBEE" icon="🚨" text={`${urgentes.length} tâche(s) urgente(s)`} onClick={()=>onNav(role.seeAll?"all":"mytasks")} />}
+
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,margin:"10px 0"}}>
-        <StatCard n={myTasks.length} label="Mes tâches" color={role.color} onClick={()=>onNav("mytasks")} />
+        <StatCard n={actives.length} label="Mes tâches" color={role.color} onClick={()=>onNav("mytasks")} />
         {role.canValidate&&<StatCard n={toValidate.length} label="À valider" color="#6A1B9A" onClick={()=>onNav("validate")} />}
-        {!role.canValidate&&<StatCard n={tasks.filter(t=>t.status==="Validée").length} label="Validées" color="#2E7D32" onClick={()=>onNav("all")} />}
-        {role.canCreate&&<StatCard n={urgentes.length} label="Urgentes" color="#C62828" onClick={()=>onNav("all")} />}
-        {role.canManageUsers&&<StatCard n={users.length} label="Utilisateurs" color="#424242" onClick={()=>onNav("people")} />}
+        {role.seeAll&&<StatCard n={tasks.filter(t=>t.status!=="Validée").length} label="Total ouvertes" color="#424242" onClick={()=>onNav("all")} />}
+        {role.canManageUsers&&<StatCard n={users.length} label="Utilisateurs" color="#00838F" onClick={()=>onNav("people")} />}
       </div>
-      {/* Mes tâches récentes */}
-      <SectionTitle label="Mes tâches récentes" action="Tout voir" onAction={()=>onNav("mytasks")} />
-      {myTasks.length===0&&<EmptyState label="Aucune tâche assignée" />}
-      {myTasks.slice(0,4).map(t=><TaskRow key={t.id} task={t} users={users} onOpen={onOpen} />)}
+
+      <SectionLabel text="MES TÂCHES RÉCENTES" action="Tout voir" onAction={()=>onNav("mytasks")} />
+      {actives.length===0&&<Empty label="Aucune tâche en cours" />}
+      {actives.slice(0,5).map(t=><TRow key={t.id} task={t} users={users} onOpen={onOpen} />)}
     </div>
   </div>;
 }
 
 // ─── MY TASKS ─────────────────────────────────────────────────
 function MyTasks({me,role,tasks,users,onOpen,onBack}){
-  const [filter,setFilter]=useState("Actives");
-  const active=tasks.filter(t=>t.status!=="Validée");
-  const done=tasks.filter(t=>t.status==="Validée");
-  const shown=filter==="Actives"?active:done;
+  const [f,setF]=useState("actives");
+  const actives  = tasks.filter(t=>t.status!=="Validée");
+  const validees = tasks.filter(t=>t.status==="Validée");
+  const shown    = f==="actives"?actives:validees;
   return <div style={{paddingBottom:72}}>
     <TopBar title="Mes tâches" onBack={onBack} />
     <div style={{display:"flex",gap:6,padding:"8px 12px",background:"#fff",borderBottom:"1px solid #eee"}}>
-      {["Actives","Validées"].map(f=><FilterChip key={f} label={`${f} (${f==="Actives"?active.length:done.length})`} active={filter===f} color={role.color} onClick={()=>setFilter(f)} />)}
+      <Chip label={`Actives (${actives.length})`} active={f==="actives"} color={role.color} onClick={()=>setF("actives")} />
+      <Chip label={`Validées (${validees.length})`} active={f==="validees"} color="#2E7D32" onClick={()=>setF("validees")} />
     </div>
     <div style={{padding:"10px 12px"}}>
-      {shown.length===0&&<EmptyState label={`Aucune tâche ${filter.toLowerCase()}`} />}
-      {shown.map(t=><TaskRow key={t.id} task={t} users={users} onOpen={onOpen} />)}
+      {shown.length===0&&<Empty label="Aucune tâche" />}
+      {shown.map(t=><TRow key={t.id} task={t} users={users} onOpen={onOpen} />)}
     </div>
   </div>;
 }
 
-// ─── ALL TASKS (direction/qualite) ───────────────────────────
-function AllTasks({me,role,tasks,users,zones,onOpen,onBack}){
-  const [fStatus,setFStatus]=useState("Tous");
-  const [fUser,setFUser]=useState("Tous");
+// ─── ALL TASKS (superviseurs) ─────────────────────────────────
+function AllTasks({me,role,tasks,users,onOpen,onBack}){
+  const [fS,setFS]=useState("Tous");
+  const [fU,setFU]=useState("Tous");
   const shown=tasks.filter(t=>{
-    const statusOk=fStatus==="Tous"||t.status===fStatus;
-    const userOk=fUser==="Tous"||t.assignedTo===fUser;
-    return statusOk&&userOk;
+    const sOk=fS==="Tous"||t.status===fS;
+    const uOk=fU==="Tous"||t.assignedTo===fU;
+    return sOk&&uOk;
   });
   return <div style={{paddingBottom:72}}>
     <TopBar title="Toutes les tâches" onBack={onBack} />
-    <div style={{padding:"8px 12px",background:"#fff",borderBottom:"1px solid #eee",display:"flex",gap:6,overflowX:"auto"}}>
-      {["Tous",...WORKFLOW].map(s=><FilterChip key={s} label={s} active={fStatus===s} color={STATUS_COLOR[s]||"#555"} onClick={()=>setFStatus(s)} />)}
+    <div style={{padding:"6px 12px",background:"#fff",borderBottom:"1px solid #eee",display:"flex",gap:5,overflowX:"auto"}}>
+      {["Tous",...WORKFLOW].map(s=><Chip key={s} label={s} active={fS===s} color={STATUS_COLOR[s]||"#555"} onClick={()=>setFS(s)} />)}
     </div>
-    <div style={{padding:"8px 12px",background:"#fff",borderBottom:"1px solid #eee",display:"flex",gap:6,overflowX:"auto"}}>
-      <FilterChip label="Tous" active={fUser==="Tous"} color="#555" onClick={()=>setFUser("Tous")} />
-      {users.map(u=><FilterChip key={u.id} label={u.name} active={fUser===u.id} color={ROLES[u.role]?.color||"#555"} onClick={()=>setFUser(u.id)} />)}
+    <div style={{padding:"6px 12px",background:"#fff",borderBottom:"1px solid #eee",display:"flex",gap:5,overflowX:"auto"}}>
+      <Chip label="Tous" active={fU==="Tous"} color="#555" onClick={()=>setFU("Tous")} />
+      {users.map(u=><Chip key={u.id} label={u.name} active={fU===u.id} color={ROLES[u.role]?.color||"#555"} onClick={()=>setFU(u.id)} />)}
     </div>
     <div style={{padding:"10px 12px"}}>
-      {shown.length===0&&<EmptyState label="Aucune tâche" />}
-      {shown.map(t=><TaskRow key={t.id} task={t} users={users} onOpen={onOpen} showAssignee />)}
+      {shown.length===0&&<Empty label="Aucune tâche" />}
+      {shown.map(t=><TRow key={t.id} task={t} users={users} onOpen={onOpen} showAssignee />)}
     </div>
   </div>;
 }
 
 // ─── TO VALIDATE ──────────────────────────────────────────────
-function ToValidate({me,tasks,users,zones,onOpen,onBack}){
+function ToValidate({tasks,users,onOpen,onBack}){
   return <div style={{paddingBottom:72}}>
     <TopBar title={`À valider (${tasks.length})`} onBack={onBack} />
     <div style={{padding:"10px 12px"}}>
-      {tasks.length===0&&<EmptyState label="Rien à valider — tout est bon !" emoji="✅" />}
-      {tasks.map(t=><TaskRow key={t.id} task={t} users={users} onOpen={onOpen} showAssignee highlight />)}
+      {tasks.length===0&&<Empty label="Rien à valider ✅" emoji="✅" />}
+      {tasks.map(t=><TRow key={t.id} task={t} users={users} onOpen={onOpen} showAssignee highlight />)}
     </div>
   </div>;
 }
 
 // ─── NEW TASK ─────────────────────────────────────────────────
 function NewTask({me,role,users,zones,onSave,onBack}){
-  const [title,setTitle]=useState("");
-  const [taskType,setTaskType]=useState("");
-  const [zoneId,setZoneId]=useState("");
-  const [priority,setPriority]=useState("Normale");
-  const [assignedTo,setAssignedTo]=useState("");
-  const [desc,setDesc]=useState("");
-  const [catFilter,setCatFilter]=useState("Tous");
-  const cats=["Tous",...new Set(zones.map(z=>z.cat))];
-  const fzones=catFilter==="Tous"?zones:zones.filter(z=>z.cat===catFilter);
+  const [title,setTitle]     = useState("");
+  const [type,setType]       = useState("");
+  const [zoneId,setZoneId]   = useState("");
+  const [catF,setCatF]       = useState("Tous");
+  const [priority,setPrio]   = useState("Normale");
+  const [assignedTo,setAss]  = useState("");
+  const [desc,setDesc]       = useState("");
+
+  const cats   = ["Tous",...new Set(zones.map(z=>z.cat))];
+  const fzones = catF==="Tous"?zones:zones.filter(z=>z.cat===catF);
 
   const save=()=>{
-    if(!title||!zoneId) return;
+    if(!title.trim()||!zoneId) return;
     onSave({
-      id:Date.now().toString(36),
-      title,taskType,zoneId,priority,desc,
-      assignedTo:assignedTo||me.id,
-      createdBy:me.id,
-      status:"À faire",
-      createdAt:new Date().toISOString(),
-      updatedAt:new Date().toISOString(),
-      photos:[],
-      history:[{date:new Date().toISOString(),by:me.id,action:"Tâche créée"}]
+      id: Date.now().toString(36)+Math.random().toString(36).slice(2,5),
+      title:title.trim(), type, zoneId, priority, desc,
+      assignedTo: assignedTo||me.id,
+      createdBy: me.id,
+      status: "À faire",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      photos: [],
+      history: [{date:new Date().toISOString(),by:me.id,action:"Tâche créée"}],
     });
   };
 
-  return <div>
+  return <div style={{paddingBottom:20}}>
     <TopBar title="Nouvelle tâche" onBack={onBack} />
     <div style={{padding:"12px",display:"flex",flexDirection:"column",gap:14}}>
-      <F label="Titre *"><input value={title} onChange={e=>setTitle(e.target.value)} placeholder="Ex : Réception TV défaillante" style={IS} /></F>
-      <F label="Type de tâche">
-        <select value={taskType} onChange={e=>setTaskType(e.target.value)} style={IS}>
-          <option value="">-- Choisir un type --</option>
+      <Fld label="Titre *">
+        <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="Ex : Réception TV défaillante" style={IS} />
+      </Fld>
+      <Fld label="Type de tâche">
+        <select value={type} onChange={e=>setType(e.target.value)} style={IS}>
+          <option value="">-- Choisir --</option>
           {TASK_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
         </select>
-      </F>
-      <F label="Zone *">
-        <div style={{display:"flex",gap:5,overflowX:"auto",marginBottom:6,paddingBottom:2}}>
-          {cats.map(c=><FilterChip key={c} small label={c} active={catFilter===c} color="#2E7D32" onClick={()=>setCatFilter(c)} />)}
+      </Fld>
+      <Fld label="Zone *">
+        <div style={{display:"flex",gap:5,overflowX:"auto",paddingBottom:4,marginBottom:4}}>
+          {cats.map(c=><Chip key={c} label={c} active={catF===c} color="#2E7D32" small onClick={()=>setCatF(c)} />)}
         </div>
         <select value={zoneId} onChange={e=>setZoneId(e.target.value)} style={IS}>
           <option value="">-- Choisir une zone --</option>
           {fzones.map(z=><option key={z.id} value={z.id}>{z.icon} {z.name}</option>)}
         </select>
-      </F>
-      <F label="Priorité">
+      </Fld>
+      <Fld label="Priorité">
         <div style={{display:"flex",gap:6}}>
           {["Urgente","Haute","Normale","Basse"].map(p=>(
-            <button key={p} onClick={()=>setPriority(p)} style={{flex:1,padding:"9px 2px",border:`2px solid ${priority===p?PRIO_COLOR[p]:"#ddd"}`,borderRadius:8,background:priority===p?PRIO_COLOR[p]:"#fff",color:priority===p?"#fff":PRIO_COLOR[p],fontSize:11,fontFamily:"sans-serif",fontWeight:priority===p?"bold":"normal",cursor:"pointer"}}>
-              {p}
-            </button>
+            <button key={p} onClick={()=>setPrio(p)} style={{flex:1,padding:"9px 2px",border:`2px solid ${priority===p?PRIO_COLOR[p]:"#ddd"}`,borderRadius:8,background:priority===p?PRIO_COLOR[p]:"#fff",color:priority===p?"#fff":PRIO_COLOR[p],fontSize:11,fontFamily:"sans-serif",fontWeight:"bold",cursor:"pointer"}}>{p}</button>
           ))}
         </div>
-      </F>
-      <F label="Assigné à">
-        <select value={assignedTo} onChange={e=>setAssignedTo(e.target.value)} style={IS}>
+      </Fld>
+      <Fld label="Assigné à">
+        <select value={assignedTo} onChange={e=>setAss(e.target.value)} style={IS}>
           <option value="">-- Moi-même --</option>
           {users.map(u=><option key={u.id} value={u.id}>{ROLES[u.role]?.icon} {u.name} ({ROLES[u.role]?.label})</option>)}
         </select>
-      </F>
-      <F label="Description"><textarea value={desc} onChange={e=>setDesc(e.target.value)} rows={3} placeholder="Contexte, détails…" style={{...IS,resize:"vertical"}} /></F>
-      <button onClick={save} disabled={!title||!zoneId} style={{background:title&&zoneId?"#2E7D32":"#BDBDBD",color:"#fff",border:"none",borderRadius:10,padding:"14px",fontFamily:"sans-serif",fontSize:15,fontWeight:"bold",cursor:title&&zoneId?"pointer":"default"}}>Créer</button>
+      </Fld>
+      <Fld label="Description">
+        <textarea value={desc} onChange={e=>setDesc(e.target.value)} rows={3} placeholder="Contexte, détails…" style={{...IS,resize:"vertical"}} />
+      </Fld>
+      <button onClick={save} disabled={!title.trim()||!zoneId} style={{background:title.trim()&&zoneId?"#2E7D32":"#BDBDBD",color:"#fff",border:"none",borderRadius:10,padding:"14px",fontFamily:"sans-serif",fontSize:15,fontWeight:"bold",cursor:title.trim()&&zoneId?"pointer":"default"}}>
+        Créer la tâche
+      </button>
     </div>
   </div>;
 }
 
 // ─── TASK DETAIL ──────────────────────────────────────────────
 function TaskDetail({task,me,role,users,zones,onSave,onDelete,onBack}){
-  const zone=zones.find(z=>z.id===task.zoneId);
-  const [note,setNote]=useState("");
-  const [rejectMsg,setRejectMsg]=useState("");
-  const [reassignTo,setReassignTo]=useState("");
-  const [analyzing,setAnalyzing]=useState(false);
-  const [aiResult,setAiResult]=useState(null);
-  const [localPhotos,setLocalPhotos]=useState(task.photos||[]);
-  const fileRef=useRef();
-  // Sync localPhotos when task.photos changes (after save/reload)
-  useEffect(()=>{ setLocalPhotos(task.photos||[]); },[task.id, task.photos?.length]);
-  const assignee=users.find(u=>u.id===task.assignedTo);
-  const creator=users.find(u=>u.id===task.createdBy);
-  const isMe=task.assignedTo===me.id;
+  const zone    = zones.find(z=>z.id===task.zoneId);
+  const assignee= users.find(u=>u.id===task.assignedTo);
+  const isMe    = task.assignedTo===me.id;
 
-  const update=(patch,histAction)=>{
-    const u={...task,...patch,updatedAt:new Date().toISOString(),
-      history:[...task.history,{date:new Date().toISOString(),by:me.id,action:histAction}]};
-    if(patch.photos) setLocalPhotos(patch.photos);
-    onSave(u);
+  // Photos stockées localement pour affichage immédiat
+  const [photos,    setPhotos]    = useState([...(task.photos||[])]);
+  const [note,      setNote]      = useState("");
+  const [rejectMsg, setRejectMsg] = useState("");
+  const [reassignTo,setReassignTo]= useState("");
+  const [analyzing, setAnalyzing] = useState(false);
+  const [aiResult,  setAiResult]  = useState(null);
+  const fileRef = useRef();
+
+  // Sync si la tâche change depuis l'extérieur
+  useEffect(()=>{ setPhotos([...(task.photos||[])]); },[task.updatedAt]);
+
+  const update = (patch, histAction)=>{
+    const updated = {
+      ...task, ...patch,
+      updatedAt: new Date().toISOString(),
+      history: [...(task.history||[]), {date:new Date().toISOString(), by:me.id, action:histAction}],
+    };
+    onSave(updated);
   };
 
-  const setStatus=(s)=>update({status:s},`Statut → ${s}`);
+  const setStatus = (s)=> update({status:s}, `Statut → ${s}`);
+  const validate  = ()=> update({status:"Validée", validatedBy:me.id}, `✅ Validé par ${me.name}`);
 
-  const addNote=()=>{
-    if(!note.trim())return;
-    update({history:[...task.history,{date:new Date().toISOString(),by:me.id,action:`💬 ${note}`}]},`💬 ${note}`);
+  const addNote = ()=>{
+    if(!note.trim()) return;
+    const h = {date:new Date().toISOString(), by:me.id, action:`💬 ${note}`};
+    update({history:[...(task.history||[]),h]}, `💬 ${note}`);
     setNote("");
   };
 
-  const validate=()=>update({status:"Validée",validatedBy:me.id},`✅ Validé par ${me.name}`);
-
-  const reject=()=>{
-    if(!rejectMsg.trim())return;
-    update({status:"Renvoyée",rejectedBy:me.id,rejectReason:rejectMsg},`🔄 Renvoyé — ${rejectMsg}`);
+  const reject = ()=>{
+    if(!rejectMsg.trim()) return;
+    update({status:"Renvoyée", rejectReason:rejectMsg}, `🔄 Renvoyé — ${rejectMsg}`);
     setRejectMsg("");
   };
 
-  const reassign=()=>{
-    if(!reassignTo)return;
-    const target=users.find(u=>u.id===reassignTo);
-    update({assignedTo:reassignTo,status:"À faire"},`📤 Réassigné à ${target?.name||"?"}`);
+  const reassign = ()=>{
+    if(!reassignTo) return;
+    const who = users.find(u=>u.id===reassignTo)?.name||"?";
+    update({assignedTo:reassignTo, status:"À faire"}, `📤 Réassigné à ${who}`);
     setReassignTo("");
   };
 
-  const handlePhoto=async(e)=>{
-    const file=e.target.files[0];if(!file)return;
-    const reader=new FileReader();
-    reader.onload=async(ev)=>{
-      const b64=ev.target.result.split(",")[1];
-      setAnalyzing(true);setAiResult(null);
-      try{
-        const r=await analyzePhoto(b64,zone?.name||task.zoneId);
-        setAiResult(r);
-        const p={date:new Date().toISOString(),url:ev.target.result,by:me.id,analysis:r};
-        const newPhotos=[...localPhotos,p];
-        setLocalPhotos(newPhotos);
-        const histAction=`📷 Photo ajoutée — IA: ${r.resume}${r.anomalies.length>0?" — ⚠️"+r.anomalies[0]:""}`;
-        const patch={photos:newPhotos};
-        if((r.priorite==="Urgente"||r.priorite==="Haute")&&task.priority==="Normale") patch.priority=r.priorite;
-        update(patch,histAction);
-      }finally{setAnalyzing(false);}
-    };
-    reader.readAsDataURL(file);
+  const handlePhoto = async(e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    e.target.value = ""; // reset input pour re-sélection
+    setAnalyzing(true); setAiResult(null);
+    try{
+      const compressed = await compressImage(file);
+      const b64 = compressed.split(",")[1];
+      const ai  = await analyzePhoto(b64, zone?.name||task.zoneId);
+      setAiResult(ai);
+      const newPhoto = {date:new Date().toISOString(), url:compressed, by:me.id, analysis:ai};
+      const newPhotos = [...photos, newPhoto];
+      setPhotos(newPhotos); // affichage immédiat
+      const patch = {photos:newPhotos};
+      if((ai.priorite==="Urgente"||ai.priorite==="Haute") && task.priority==="Normale") patch.priority = ai.priorite;
+      update(patch, `📷 Photo ajoutée — ${ai.resume}`);
+    }finally{ setAnalyzing(false); }
   };
 
-  const canAddPhoto = isMe || role.canValidate;
-  const canChangeStatus = isMe;
-  const canValidateTask = role.canValidate && task.status==="À valider";
-  const canReassign = role.canReassign;
-  const sendToValidate = isMe && (task.status==="En cours" || task.status==="À faire");
+  const deletePhoto = (i)=>{
+    if(!confirm("Supprimer cette photo ?")) return;
+    const newPhotos = photos.filter((_,idx)=>idx!==i);
+    setPhotos(newPhotos);
+    update({photos:newPhotos}, "🗑 Photo supprimée");
+  };
 
-  return <div style={{paddingBottom:20}}>
+  const canPhoto       = isMe || role.canValidate;
+  const canStart       = isMe && task.status==="À faire";
+  const canSendValidate= isMe && (task.status==="En cours"||task.status==="À faire");
+  const canValidate    = role.canValidate && task.status==="À valider";
+  const canReassign    = role.canReassign;
+  const canDelete      = role.canManageUsers; // Direction uniquement
+
+  return <div style={{paddingBottom:24}}>
     <TopBar title="Détail de la tâche" onBack={onBack} />
     <div style={{padding:"12px",display:"flex",flexDirection:"column",gap:10}}>
 
-      {/* Info principale */}
+      {/* ── Infos ── */}
       <Card>
         <div style={{fontSize:17,fontWeight:"bold",color:"#1A1A1A",marginBottom:4}}>{task.title}</div>
-        <div style={{fontFamily:"sans-serif",fontSize:12,color:"#757575",marginBottom:8}}>{zone?.icon} {zone?.name} · {zone?.cat}{task.taskType&&<span style={{marginLeft:8,background:"#E3F2FD",color:"#1565C0",borderRadius:4,padding:"1px 6px",fontWeight:"bold"}}>{task.taskType}</span>}</div>
+        <div style={{fontFamily:"sans-serif",fontSize:12,color:"#757575",marginBottom:8}}>
+          {zone?.icon} {zone?.name}
+          {task.type&&<span style={{marginLeft:8,background:"#E3F2FD",color:"#1565C0",borderRadius:4,padding:"1px 7px",fontWeight:"bold",fontFamily:"sans-serif",fontSize:11}}>{task.type}</span>}
+        </div>
         <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-          <Tag bg={PRIO_COLOR[task.priority]||"#555"} label={task.priority} />
-          <Tag bg={STATUS_COLOR[task.status]||"#555"} label={task.status} />
-          {assignee&&<Tag bg={ROLES[assignee.role]?.color||"#555"} label={`👤 ${assignee.name}`} />}
+          <Tag bg={PRIO_COLOR[task.priority]||"#9E9E9E"} label={task.priority} />
+          <Tag bg={STATUS_COLOR[task.status]||"#9E9E9E"} label={task.status} />
+          {assignee&&<Tag bg={ROLES[assignee.role]?.color||"#9E9E9E"} label={`👤 ${assignee.name}`} />}
         </div>
         {task.desc&&<div style={{marginTop:8,fontFamily:"sans-serif",fontSize:13,color:"#424242",lineHeight:1.5}}>{task.desc}</div>}
-        {task.rejectReason&&<div style={{marginTop:8,background:"#FFEBEE",borderRadius:8,padding:"8px",fontFamily:"sans-serif",fontSize:12,color:"#C62828"}}>
-          🔄 Renvoyée : {task.rejectReason}
-        </div>}
+        {task.rejectReason&&<div style={{marginTop:8,background:"#FFEBEE",borderRadius:8,padding:"8px 10px",fontFamily:"sans-serif",fontSize:12,color:"#C62828"}}>🔄 Renvoyée : {task.rejectReason}</div>}
       </Card>
 
-      {/* Actions selon statut et rôle */}
-      {canChangeStatus && task.status==="À faire" && (
-        <ActionBtn color="#1565C0" onClick={()=>setStatus("En cours")}>▶ Commencer la tâche</ActionBtn>
-      )}
-      {/* Statut visible */}
-      {task.status==="À valider"&&<div style={{background:"#F3E5F5",border:"2px solid #6A1B9A",borderRadius:10,padding:"12px",textAlign:"center"}}>
-        <div style={{fontSize:20,marginBottom:4}}>⏳</div>
-        <div style={{fontFamily:"sans-serif",fontSize:14,fontWeight:"bold",color:"#6A1B9A"}}>En attente de validation</div>
-        <div style={{fontFamily:"sans-serif",fontSize:12,color:"#9E9E9E",marginTop:2}}>La direction va vérifier votre travail</div>
-      </div>}
-      {task.status==="Validée"&&<div style={{background:"#E8F5E9",border:"2px solid #2E7D32",borderRadius:10,padding:"12px",textAlign:"center"}}>
-        <div style={{fontSize:20,marginBottom:4}}>✅</div>
-        <div style={{fontFamily:"sans-serif",fontSize:14,fontWeight:"bold",color:"#2E7D32"}}>Tâche validée !</div>
-      </div>}
-      {sendToValidate && (
-        <ActionBtn color="#6A1B9A" onClick={()=>setStatus("À valider")}>📤 Envoyer en validation</ActionBtn>
-      )}
+      {/* ── Statut bandeaux ── */}
+      {task.status==="À valider"&&
+        <div style={{background:"#F3E5F5",border:"2px solid #6A1B9A",borderRadius:10,padding:"14px",textAlign:"center"}}>
+          <div style={{fontSize:24,marginBottom:4}}>⏳</div>
+          <div style={{fontFamily:"sans-serif",fontSize:14,fontWeight:"bold",color:"#6A1B9A"}}>En attente de validation</div>
+          <div style={{fontFamily:"sans-serif",fontSize:12,color:"#9E9E9E",marginTop:2}}>La direction va vérifier votre travail</div>
+        </div>}
+      {task.status==="Validée"&&
+        <div style={{background:"#E8F5E9",border:"2px solid #2E7D32",borderRadius:10,padding:"14px",textAlign:"center"}}>
+          <div style={{fontSize:24,marginBottom:4}}>✅</div>
+          <div style={{fontFamily:"sans-serif",fontSize:14,fontWeight:"bold",color:"#2E7D32"}}>Tâche validée !</div>
+        </div>}
 
-      {/* Validation */}
-      {canValidateTask && <Card title="🔍 Validation" titleColor="#6A1B9A">
-        <div style={{display:"flex",gap:8,marginBottom:8}}>
-          <button onClick={validate} style={{flex:1,background:"#2E7D32",color:"#fff",border:"none",borderRadius:8,padding:"11px",fontFamily:"sans-serif",fontSize:13,fontWeight:"bold",cursor:"pointer"}}>✅ Valider</button>
-        </div>
-        <div style={{fontFamily:"sans-serif",fontSize:12,color:"#757575",marginBottom:5}}>Renvoyer avec motif :</div>
-        <div style={{display:"flex",gap:8}}>
-          <input value={rejectMsg} onChange={e=>setRejectMsg(e.target.value)} placeholder="Ex: SDB pas terminée" style={{...IS,flex:1}} />
-          <button onClick={reject} style={{background:"#C62828",color:"#fff",border:"none",borderRadius:8,padding:"8px 12px",fontFamily:"sans-serif",fontSize:12,cursor:"pointer"}}>🔄</button>
-        </div>
-      </Card>}
+      {/* ── Actions ── */}
+      {canStart&&<Btn color="#1565C0" onClick={()=>setStatus("En cours")}>▶ Commencer la tâche</Btn>}
+      {canSendValidate&&task.status!=="À valider"&&task.status!=="Validée"&&
+        <Btn color="#6A1B9A" onClick={()=>setStatus("À valider")}>📤 Envoyer en validation</Btn>}
 
-      {/* Réassignation */}
-      {canReassign && <Card title="📤 Réassigner">
-        <div style={{display:"flex",gap:8}}>
-          <select value={reassignTo} onChange={e=>setReassignTo(e.target.value)} style={{...IS,flex:1}}>
-            <option value="">-- Choisir --</option>
-            {users.filter(u=>u.id!==task.assignedTo).map(u=><option key={u.id} value={u.id}>{ROLES[u.role]?.icon} {u.name}</option>)}
-          </select>
-          <button onClick={reassign} disabled={!reassignTo} style={{background:reassignTo?"#2E7D32":"#BDBDBD",color:"#fff",border:"none",borderRadius:8,padding:"8px 14px",fontFamily:"sans-serif",fontSize:13,cursor:reassignTo?"pointer":"default"}}>OK</button>
-        </div>
-      </Card>}
+      {/* ── Validation (superviseurs) ── */}
+      {canValidate&&
+        <Card title="🔍 Validation" titleColor="#6A1B9A">
+          <button onClick={validate} style={{width:"100%",background:"#2E7D32",color:"#fff",border:"none",borderRadius:8,padding:"12px",fontFamily:"sans-serif",fontSize:14,fontWeight:"bold",cursor:"pointer",marginBottom:10}}>✅ Valider</button>
+          <div style={{fontFamily:"sans-serif",fontSize:12,color:"#757575",marginBottom:6}}>Renvoyer avec motif :</div>
+          <div style={{display:"flex",gap:8}}>
+            <input value={rejectMsg} onChange={e=>setRejectMsg(e.target.value)} placeholder="Ex: SDB pas terminée" style={{...IS,flex:1}} />
+            <button onClick={reject} style={{background:"#C62828",color:"#fff",border:"none",borderRadius:8,padding:"8px 14px",fontFamily:"sans-serif",fontWeight:"bold",cursor:"pointer"}}>🔄</button>
+          </div>
+        </Card>}
 
-      {/* Photos */}
-      <Card title={`📷 Photos (${localPhotos.length})`}>
+      {/* ── Réassigner ── */}
+      {canReassign&&
+        <Card title="📤 Réassigner">
+          <div style={{display:"flex",gap:8}}>
+            <select value={reassignTo} onChange={e=>setReassignTo(e.target.value)} style={{...IS,flex:1}}>
+              <option value="">-- Choisir --</option>
+              {users.filter(u=>u.id!==task.assignedTo).map(u=><option key={u.id} value={u.id}>{ROLES[u.role]?.icon} {u.name}</option>)}
+            </select>
+            <button onClick={reassign} disabled={!reassignTo} style={{background:reassignTo?"#2E7D32":"#BDBDBD",color:"#fff",border:"none",borderRadius:8,padding:"8px 14px",fontFamily:"sans-serif",fontWeight:"bold",cursor:reassignTo?"pointer":"default"}}>OK</button>
+          </div>
+        </Card>}
+
+      {/* ── PHOTOS ── */}
+      <Card title={`📷 Photos (${photos.length})`}>
         <input type="file" accept="image/*" capture="environment" ref={fileRef} onChange={handlePhoto} style={{display:"none"}} />
-        {canAddPhoto&&<button onClick={()=>fileRef.current.click()} disabled={analyzing} style={{width:"100%",padding:"12px",border:"1.5px dashed #2E7D32",borderRadius:8,background:analyzing?"#F5F5F5":"#F1F8F1",color:"#2E7D32",fontFamily:"sans-serif",fontSize:14,cursor:"pointer",fontWeight:"bold",marginBottom:10}}>
-          {analyzing?"🔍 Analyse IA en cours…":"📷 Prendre / ajouter une photo"}
-        </button>}
-        {aiResult&&<AIResult r={aiResult} />}
-        {localPhotos.length===0&&<div style={{textAlign:"center",color:"#BDBDBD",fontFamily:"sans-serif",fontSize:12,padding:"12px 0"}}>Aucune photo ajoutée</div>}
-        {localPhotos.length>0&&<div style={{display:"flex",flexDirection:"column",gap:10,marginTop:4}}>
-          {localPhotos.map((p,i)=>{
-            const byUser=users.find(u=>u.id===p.by);
-            const isMine=p.by===me.id;
-            const deletePhoto=()=>{
-              if(!confirm("Supprimer cette photo ?")) return;
-              const newPhotos=localPhotos.filter((_,idx)=>idx!==i);
-              setLocalPhotos(newPhotos);
-              update({photos:newPhotos},`🗑 Photo supprimée`);
-            };
-            return <div key={i} style={{background:"#F8F9FA",borderRadius:10,padding:"8px",border:"1px solid #E0E0E0"}}>
-              <img src={p.url} alt="" style={{width:"100%",maxHeight:220,objectFit:"cover",borderRadius:8,display:"block"}} />
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:6}}>
+
+        {canPhoto&&
+          <button onClick={()=>fileRef.current.click()} disabled={analyzing}
+            style={{width:"100%",padding:"13px",border:"2px dashed #2E7D32",borderRadius:8,background:analyzing?"#F5F5F5":"#F1F8F1",color:"#2E7D32",fontFamily:"sans-serif",fontSize:14,fontWeight:"bold",cursor:analyzing?"default":"pointer",marginBottom:12}}>
+            {analyzing?"🔍 Analyse en cours…":"📷 Prendre / ajouter une photo"}
+          </button>}
+
+        {aiResult&&
+          <div style={{background:aiResult.anomalies?.length>0?"#FFF8E1":"#E8F5E9",borderRadius:8,padding:"10px",marginBottom:10,border:"1px solid #E0E0E0"}}>
+            <div style={{fontFamily:"sans-serif",fontSize:12,fontWeight:"bold",color:PRIO_COLOR[aiResult.priorite]||"#2E7D32",marginBottom:4}}>IA — {aiResult.priorite} — {aiResult.resume}</div>
+            {aiResult.anomalies?.map((a,i)=><div key={i} style={{fontFamily:"sans-serif",fontSize:12,color:"#424242"}}>• {a}</div>)}
+          </div>}
+
+        {photos.length===0&&
+          <div style={{textAlign:"center",color:"#BDBDBD",fontFamily:"sans-serif",fontSize:13,padding:"16px 0"}}>Aucune photo</div>}
+
+        {photos.map((p,i)=>{
+          const who   = users.find(u=>u.id===p.by)?.name||"?";
+          const mine  = p.by===me.id && task.status!=="Validée";
+          return (
+            <div key={i} style={{background:"#F8F9FA",borderRadius:10,border:"1px solid #E0E0E0",overflow:"hidden",marginBottom:10}}>
+              <img src={p.url} alt="" style={{width:"100%",display:"block",maxHeight:260,objectFit:"cover"}} />
+              <div style={{padding:"8px 10px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <div>
-                  <div style={{fontFamily:"sans-serif",fontSize:11,fontWeight:"bold",color:"#424242"}}>{byUser?.name||"?"}</div>
+                  <div style={{fontFamily:"sans-serif",fontSize:12,fontWeight:"bold",color:"#424242"}}>{who}</div>
                   <div style={{fontFamily:"sans-serif",fontSize:10,color:"#9E9E9E"}}>{new Date(p.date).toLocaleString("fr-FR")}</div>
                 </div>
-                {isMine&&task.status!=="Validée"&&<button onClick={deletePhoto} style={{background:"#FFEBEE",border:"none",borderRadius:6,padding:"5px 10px",color:"#C62828",fontFamily:"sans-serif",fontSize:11,cursor:"pointer",fontWeight:"bold"}}>🗑 Supprimer</button>}
+                {mine&&
+                  <button onClick={()=>deletePhoto(i)} style={{background:"#FFEBEE",border:"none",borderRadius:6,padding:"5px 10px",color:"#C62828",fontFamily:"sans-serif",fontSize:11,fontWeight:"bold",cursor:"pointer"}}>
+                    🗑 Supprimer
+                  </button>}
               </div>
-              {p.analysis&&p.analysis.anomalies&&p.analysis.anomalies.length>0&&<div style={{marginTop:6,background:"#FFF8E1",borderRadius:6,padding:"6px 8px",fontFamily:"sans-serif",fontSize:11,color:"#E65100"}}>
-                ⚠ {p.analysis.anomalies.join(" · ")}
-              </div>}
-            </div>;
-          })}
-        </div>}
+              {p.analysis?.anomalies?.length>0&&
+                <div style={{background:"#FFF8E1",padding:"6px 10px",fontFamily:"sans-serif",fontSize:11,color:"#E65100"}}>
+                  ⚠ {p.analysis.anomalies.join(" · ")}
+                </div>}
+            </div>
+          );
+        })}
       </Card>
 
-      {/* Note */}
+      {/* ── Note ── */}
       <Card title="💬 Ajouter une note">
         <div style={{display:"flex",gap:8}}>
           <input value={note} onChange={e=>setNote(e.target.value)} placeholder="Observation, info…" style={{...IS,flex:1}} onKeyDown={e=>e.key==="Enter"&&addNote()} />
-          <button onClick={addNote} style={{background:"#2E7D32",color:"#fff",border:"none",borderRadius:8,padding:"8px 14px",fontFamily:"sans-serif",fontSize:13,cursor:"pointer"}}>OK</button>
+          <button onClick={addNote} style={{background:"#2E7D32",color:"#fff",border:"none",borderRadius:8,padding:"8px 14px",fontFamily:"sans-serif",fontWeight:"bold",cursor:"pointer"}}>OK</button>
         </div>
       </Card>
 
-      {/* Historique */}
+      {/* ── Historique ── */}
       <Card title="📋 Historique">
-        {[...task.history].reverse().map((h,i)=>{
-          const u=users.find(x=>x.id===h.by);
-          return <div key={i} style={{display:"flex",gap:8,marginBottom:7,alignItems:"flex-start"}}>
-            <div style={{width:6,height:6,borderRadius:"50%",background:ROLES[u?.role]?.color||"#9E9E9E",marginTop:5,flexShrink:0}} />
+        {[...(task.history||[])].reverse().map((h,i)=>{
+          const u = users.find(x=>x.id===h.by);
+          return <div key={i} style={{display:"flex",gap:8,marginBottom:8,alignItems:"flex-start"}}>
+            <div style={{width:6,height:6,borderRadius:"50%",background:ROLES[u?.role]?.color||"#BDBDBD",marginTop:5,flexShrink:0}} />
             <div>
               <div style={{fontFamily:"sans-serif",fontSize:12,color:"#212121"}}>{h.action}</div>
               <div style={{fontFamily:"sans-serif",fontSize:10,color:"#9E9E9E"}}>{u?.name||"?"} · {new Date(h.date).toLocaleString("fr-FR")}</div>
@@ -582,40 +614,44 @@ function TaskDetail({task,me,role,users,zones,onSave,onDelete,onBack}){
         })}
       </Card>
 
-      {/* Supprimer — Direction uniquement */}
-      {role.canManageUsers&&<button onClick={()=>{if(confirm("Supprimer cette tâche définitivement ?"))onDelete();}} style={{background:"#fff",color:"#C62828",border:"1.5px solid #C62828",borderRadius:10,padding:"12px",fontFamily:"sans-serif",fontSize:13,cursor:"pointer"}}>🗑 Supprimer la tâche (Direction)</button>}
+      {/* ── Supprimer — Direction uniquement ── */}
+      {canDelete&&
+        <button onClick={()=>{if(confirm("Supprimer définitivement cette tâche ?")) onDelete();}}
+          style={{background:"#fff",color:"#C62828",border:"1.5px solid #C62828",borderRadius:10,padding:"12px",fontFamily:"sans-serif",fontSize:13,cursor:"pointer",width:"100%"}}>
+          🗑 Supprimer la tâche (Direction uniquement)
+        </button>}
     </div>
   </div>;
 }
 
 // ─── PEOPLE ───────────────────────────────────────────────────
-function People({me,role,users,onSave,onBack}){
-  const [adding,setAdding]=useState(false);
-  const [editingPin,setEditingPin]=useState(null); // user id being edited
-  const [newPin,setNewPin]=useState("");
-  const [name,setName]=useState("");
-  const [userRole,setUserRole]=useState("menage");
-  const [pin,setPin]=useState("");
+function People({me,users,onSave,onBack}){
+  const [adding,   setAdding]   = useState(false);
+  const [editPin,  setEditPin]  = useState(null);
+  const [newPin,   setNewPin]   = useState("");
+  const [name,     setName]     = useState("");
+  const [uRole,    setURole]    = useState("menage");
+  const [pin,      setPin]      = useState("");
 
-  const add=()=>{
-    if(!name.trim())return;
-    const u=[...users,{id:Date.now().toString(36),name:name.trim(),role:userRole,pin:pin||""}];
-    onSave(u);setName("");setPin("");setAdding(false);
+  const add = ()=>{
+    if(!name.trim()) return;
+    onSave([...users,{id:Date.now().toString(36),name:name.trim(),role:uRole,pin}]);
+    setName(""); setPin(""); setURole("menage"); setAdding(false);
   };
-  const remove=(id)=>{
-    if(id===me.id)return;
+  const remove = (id)=>{
+    if(id===me.id) return;
     if(confirm("Supprimer cet utilisateur ?")) onSave(users.filter(u=>u.id!==id));
   };
-  const savePin=(id)=>{
-    const u=users.map(x=>x.id===id?{...x,pin:newPin}:x);
-    onSave(u);setEditingPin(null);setNewPin("");
+  const savePin = (id)=>{
+    onSave(users.map(u=>u.id===id?{...u,pin:newPin}:u));
+    setEditPin(null); setNewPin("");
   };
 
   return <div>
-    <TopBar title="Utilisateurs" onBack={onBack} />
+    <TopBar title="Équipe" onBack={onBack} />
     <div style={{padding:"12px",display:"flex",flexDirection:"column",gap:10}}>
       {users.map(u=>{
-        const r=ROLES[u.role];
+        const r = ROLES[u.role];
         return <div key={u.id} style={{background:"#fff",border:"1px solid #E0E0E0",borderRadius:12,padding:"12px 14px"}}>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
             <div style={{width:40,height:40,borderRadius:"50%",background:r?.color||"#9E9E9E",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{r?.icon}</div>
@@ -624,112 +660,108 @@ function People({me,role,users,onSave,onBack}){
               <div style={{fontFamily:"sans-serif",fontSize:12,color:"#9E9E9E"}}>{r?.label} · PIN : {u.pin?u.pin.replace(/./g,"●"):"aucun"}</div>
             </div>
             <div style={{display:"flex",gap:6}}>
-              <button onClick={()=>{setEditingPin(editingPin===u.id?null:u.id);setNewPin(u.pin||"");}} style={{background:"#E3F2FD",border:"none",borderRadius:6,padding:"5px 10px",color:"#1565C0",fontFamily:"sans-serif",fontSize:11,cursor:"pointer",fontWeight:"bold"}}>🔑 PIN</button>
-              {u.id!==me.id&&<button onClick={()=>remove(u.id)} style={{background:"#FFEBEE",border:"none",borderRadius:6,padding:"5px 8px",color:"#C62828",fontSize:14,cursor:"pointer"}}>×</button>}
+              <button onClick={()=>{setEditPin(editPin===u.id?null:u.id);setNewPin(u.pin||"");}} style={{background:"#E3F2FD",border:"none",borderRadius:6,padding:"5px 10px",color:"#1565C0",fontFamily:"sans-serif",fontSize:11,fontWeight:"bold",cursor:"pointer"}}>🔑 PIN</button>
+              {u.id!==me.id&&<button onClick={()=>remove(u.id)} style={{background:"#FFEBEE",border:"none",borderRadius:6,padding:"5px 10px",color:"#C62828",fontFamily:"sans-serif",fontSize:12,fontWeight:"bold",cursor:"pointer"}}>×</button>}
             </div>
           </div>
-          {editingPin===u.id&&<div style={{marginTop:10,display:"flex",gap:8,alignItems:"center"}}>
-            <input value={newPin} onChange={e=>setNewPin(e.target.value)} placeholder="Nouveau PIN (laisser vide = sans PIN)" maxLength={6} inputMode="numeric" style={{...IS,flex:1}} />
-            <button onClick={()=>savePin(u.id)} style={{background:"#2E7D32",color:"#fff",border:"none",borderRadius:8,padding:"9px 14px",fontFamily:"sans-serif",fontSize:13,cursor:"pointer",fontWeight:"bold"}}>OK</button>
-            <button onClick={()=>setEditingPin(null)} style={{background:"#fff",color:"#9E9E9E",border:"1px solid #ddd",borderRadius:8,padding:"9px 10px",fontFamily:"sans-serif",fontSize:12,cursor:"pointer"}}>✕</button>
-          </div>}
+          {editPin===u.id&&
+            <div style={{marginTop:10,display:"flex",gap:8,alignItems:"center"}}>
+              <input value={newPin} onChange={e=>setNewPin(e.target.value)} placeholder="Nouveau PIN (vide = sans PIN)" maxLength={6} inputMode="numeric" style={{...IS,flex:1}} />
+              <button onClick={()=>savePin(u.id)} style={{background:"#2E7D32",color:"#fff",border:"none",borderRadius:8,padding:"9px 14px",fontFamily:"sans-serif",fontWeight:"bold",cursor:"pointer"}}>OK</button>
+              <button onClick={()=>setEditPin(null)} style={{background:"#fff",color:"#9E9E9E",border:"1px solid #ddd",borderRadius:8,padding:"9px 10px",fontFamily:"sans-serif",cursor:"pointer"}}>✕</button>
+            </div>}
         </div>;
       })}
-      {!adding&&<button onClick={()=>setAdding(true)} style={{background:"#F1F8F1",border:"1.5px dashed #2E7D32",borderRadius:12,padding:"13px",color:"#2E7D32",fontFamily:"sans-serif",fontSize:14,fontWeight:"bold",cursor:"pointer"}}>+ Ajouter un utilisateur</button>}
-      {adding&&<Card title="Nouvel utilisateur">
-        <F label="Nom"><input value={name} onChange={e=>setName(e.target.value)} placeholder="Prénom" style={IS} /></F>
-        <div style={{height:8}} />
-        <F label="Rôle">
-          <select value={userRole} onChange={e=>setUserRole(e.target.value)} style={IS}>
-            {Object.entries(ROLES).map(([k,v])=><option key={k} value={k}>{v.icon} {v.label}</option>)}
-          </select>
-        </F>
-        <div style={{height:8}} />
-        <F label="Code PIN (optionnel)"><input value={pin} onChange={e=>setPin(e.target.value)} placeholder="Ex: 1234" maxLength={6} inputMode="numeric" style={IS} /></F>
-        <div style={{height:10}} />
-        <div style={{display:"flex",gap:8}}>
-          <button onClick={add} disabled={!name} style={{flex:1,background:name?"#2E7D32":"#BDBDBD",color:"#fff",border:"none",borderRadius:8,padding:"11px",fontFamily:"sans-serif",fontWeight:"bold",cursor:name?"pointer":"default"}}>Créer</button>
-          <button onClick={()=>setAdding(false)} style={{flex:1,background:"#fff",color:"#424242",border:"1px solid #ddd",borderRadius:8,padding:"11px",fontFamily:"sans-serif",cursor:"pointer"}}>Annuler</button>
-        </div>
-      </Card>}
+
+      {!adding&&
+        <button onClick={()=>setAdding(true)} style={{background:"#F1F8F1",border:"1.5px dashed #2E7D32",borderRadius:12,padding:"14px",color:"#2E7D32",fontFamily:"sans-serif",fontSize:14,fontWeight:"bold",cursor:"pointer"}}>
+          + Ajouter un utilisateur
+        </button>}
+
+      {adding&&
+        <Card title="Nouvel utilisateur">
+          <Fld label="Prénom"><input value={name} onChange={e=>setName(e.target.value)} placeholder="Prénom" style={IS} /></Fld>
+          <div style={{height:8}}/>
+          <Fld label="Rôle">
+            <select value={uRole} onChange={e=>setURole(e.target.value)} style={IS}>
+              {Object.entries(ROLES).map(([k,v])=><option key={k} value={k}>{v.icon} {v.label}</option>)}
+            </select>
+          </Fld>
+          <div style={{height:8}}/>
+          <Fld label="PIN (optionnel)"><input value={pin} onChange={e=>setPin(e.target.value)} placeholder="Ex: 1234" maxLength={6} inputMode="numeric" style={IS} /></Fld>
+          <div style={{height:12}}/>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={add} disabled={!name.trim()} style={{flex:1,background:name.trim()?"#2E7D32":"#BDBDBD",color:"#fff",border:"none",borderRadius:8,padding:"11px",fontFamily:"sans-serif",fontWeight:"bold",cursor:name.trim()?"pointer":"default"}}>Créer</button>
+            <button onClick={()=>setAdding(false)} style={{flex:1,background:"#fff",color:"#424242",border:"1px solid #ddd",borderRadius:8,padding:"11px",fontFamily:"sans-serif",cursor:"pointer"}}>Annuler</button>
+          </div>
+        </Card>}
     </div>
   </div>;
 }
 
 // ─── PROFILE ──────────────────────────────────────────────────
 function Profile({me,onLogout,onBack}){
-  const r=ROLES[me.role];
+  const r = ROLES[me.role];
   return <div>
-    <TopBar title="Profil" onBack={onBack} />
-    <div style={{padding:20,display:"flex",flexDirection:"column",alignItems:"center",gap:12}}>
-      <div style={{width:72,height:72,borderRadius:"50%",background:r.color,display:"flex",alignItems:"center",justifyContent:"center",fontSize:32}}>{r.icon}</div>
+    <TopBar title="Mon profil" onBack={onBack} />
+    <div style={{padding:24,display:"flex",flexDirection:"column",alignItems:"center",gap:12}}>
+      <div style={{width:72,height:72,borderRadius:"50%",background:r.color,display:"flex",alignItems:"center",justifyContent:"center",fontSize:34}}>{r.icon}</div>
       <div style={{fontFamily:"Georgia,serif",fontSize:20,color:"#1A1A1A"}}>{me.name}</div>
       <Tag bg={r.color} label={r.label} />
-      <button onClick={onLogout} style={{marginTop:20,background:"#fff",color:"#C62828",border:"1.5px solid #C62828",borderRadius:10,padding:"12px 30px",fontFamily:"sans-serif",fontSize:14,cursor:"pointer"}}>Changer d'utilisateur</button>
+      <button onClick={onLogout} style={{marginTop:16,background:"#fff",color:"#C62828",border:"1.5px solid #C62828",borderRadius:10,padding:"12px 32px",fontFamily:"sans-serif",fontSize:14,cursor:"pointer"}}>
+        Changer d'utilisateur
+      </button>
     </div>
   </div>;
 }
 
-// ─── SHARED COMPONENTS ────────────────────────────────────────
+// ─── COMPOSANTS PARTAGÉS ──────────────────────────────────────
 function Shell({children}){return <div style={{fontFamily:"Georgia,serif",background:"#F8F9FA",minHeight:"100vh",maxWidth:480,margin:"0 auto",position:"relative"}}>{children}</div>;}
-function TopBar({title,onBack}){return <div style={{background:"#2E7D32",color:"#fff",padding:"14px 12px",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:10}}><button onClick={onBack} style={{background:"none",border:"none",color:"#fff",fontSize:22,cursor:"pointer",lineHeight:1,padding:0}}>←</button><div style={{fontSize:16,fontWeight:"bold",flex:1}}>{title}</div></div>;}
+function TopBar({title,onBack}){return <div style={{background:"#2E7D32",color:"#fff",padding:"14px 12px",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:10}}><button onClick={onBack} style={{background:"none",border:"none",color:"#fff",fontSize:22,cursor:"pointer",padding:0,lineHeight:1}}>←</button><div style={{fontSize:16,fontWeight:"bold",flex:1}}>{title}</div></div>;}
 function Card({title,titleColor="#2E7D32",children}){return <div style={{background:"#fff",border:"1px solid #E0E0E0",borderRadius:12,padding:"12px"}}>{title&&<div style={{fontFamily:"sans-serif",fontSize:11,fontWeight:"bold",color:titleColor,letterSpacing:.5,textTransform:"uppercase",marginBottom:8}}>{title}</div>}{children}</div>;}
-function StatCard({n,label,color,onClick}){return <button onClick={onClick} style={{background:"#fff",border:`1.5px solid ${color}20`,borderRadius:12,padding:"14px",textAlign:"center",cursor:"pointer",display:"block"}}><div style={{fontSize:28,fontWeight:"bold",color,fontFamily:"Georgia,serif"}}>{n}</div><div style={{fontFamily:"sans-serif",fontSize:11,color:"#757575",marginTop:2}}>{label}</div></button>;}
+function StatCard({n,label,color,onClick}){return <button onClick={onClick} style={{background:"#fff",border:`1.5px solid ${color}22`,borderRadius:12,padding:"14px",textAlign:"center",cursor:"pointer",display:"block"}}><div style={{fontSize:28,fontWeight:"bold",color,fontFamily:"Georgia,serif"}}>{n}</div><div style={{fontFamily:"sans-serif",fontSize:11,color:"#757575",marginTop:2}}>{label}</div></button>;}
 function Tag({bg,label}){return <span style={{background:bg,color:"#fff",borderRadius:6,padding:"2px 8px",fontSize:11,fontFamily:"sans-serif"}}>{label}</span>;}
-function FilterChip({label,active,color,onClick,small}){return <button onClick={onClick} style={{flexShrink:0,padding:small?"3px 8px":"6px 11px",border:`1.5px solid ${active?color:"#E0E0E0"}`,borderRadius:20,background:active?color:"#fff",color:active?"#fff":color,fontSize:small?10:12,fontFamily:"sans-serif",cursor:"pointer",fontWeight:active?"bold":"normal"}}>{label}</button>;}
-function SectionTitle({label,action,onAction}){return <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",margin:"10px 0 6px"}}><div style={{fontFamily:"sans-serif",fontSize:11,fontWeight:"bold",color:"#9E9E9E",letterSpacing:.5,textTransform:"uppercase"}}>{label}</div>{action&&<button onClick={onAction} style={{background:"none",border:"none",color:"#2E7D32",fontFamily:"sans-serif",fontSize:12,cursor:"pointer"}}>{action}</button>}</div>;}
-function EmptyState({label,emoji="📭"}){return <div style={{textAlign:"center",color:"#9E9E9E",padding:"36px 20px",fontFamily:"sans-serif",fontSize:13}}><div style={{fontSize:28,marginBottom:6}}>{emoji}</div>{label}</div>;}
-function ActionBtn({color,onClick,children}){return <button onClick={onClick} style={{width:"100%",background:color,color:"#fff",border:"none",borderRadius:10,padding:"13px",fontFamily:"sans-serif",fontSize:14,fontWeight:"bold",cursor:"pointer"}}>{children}</button>;}
-function AlertBanner({color,bg,icon,label,items,users,onOpen,isButton}){
-  return <div style={{background:bg,border:`1.5px solid ${color}`,borderRadius:10,padding:"10px 12px",marginBottom:10}}>
-    <div style={{color,fontWeight:"bold",fontSize:13,marginBottom:isButton||items.length===0?0:6,fontFamily:"sans-serif",cursor:isButton?"pointer":"default"}} onClick={isButton?onOpen:undefined}>
-      {icon} {label} {isButton&&"→"}
-    </div>
-    {items.map(t=><button key={t.id} onClick={()=>onOpen(t.id)} style={{width:"100%",background:"#fff",border:"none",borderRadius:8,padding:"7px 10px",marginBottom:4,textAlign:"left",cursor:"pointer",display:"flex",justifyContent:"space-between"}}>
-      <div style={{fontFamily:"sans-serif",fontSize:13,fontWeight:"bold",color}}>{t.title}</div>
-      <span style={{fontSize:12,color:"#9E9E9E"}}>›</span>
-    </button>)}
-  </div>;
-}
-function TaskRow({task,users,onOpen,showAssignee,highlight}){
+function Chip({label,active,color,onClick,small}){return <button onClick={onClick} style={{flexShrink:0,padding:small?"3px 8px":"6px 11px",border:`1.5px solid ${active?color:"#E0E0E0"}`,borderRadius:20,background:active?color:"#fff",color:active?"#fff":color,fontSize:small?10:12,fontFamily:"sans-serif",cursor:"pointer",fontWeight:active?"bold":"normal",whiteSpace:"nowrap"}}>{label}</button>;}
+function Banner({color,bg,icon,text,onClick}){return <button onClick={onClick} style={{width:"100%",background:bg,border:`1.5px solid ${color}`,borderRadius:10,padding:"10px 14px",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",textAlign:"left"}}><div style={{color,fontWeight:"bold",fontSize:13,fontFamily:"sans-serif"}}>{icon} {text}</div><span style={{color,fontSize:14}}>›</span></button>;}
+function SectionLabel({text,action,onAction}){return <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",margin:"10px 0 6px"}}><div style={{fontFamily:"sans-serif",fontSize:11,fontWeight:"bold",color:"#9E9E9E",letterSpacing:.5}}>{text}</div>{action&&<button onClick={onAction} style={{background:"none",border:"none",color:"#2E7D32",fontFamily:"sans-serif",fontSize:12,cursor:"pointer"}}>{action}</button>}</div>;}
+function Empty({label,emoji="📭"}){return <div style={{textAlign:"center",color:"#9E9E9E",padding:"36px 20px",fontFamily:"sans-serif",fontSize:13}}><div style={{fontSize:28,marginBottom:6}}>{emoji}</div>{label}</div>;}
+function Btn({color,onClick,children}){return <button onClick={onClick} style={{width:"100%",background:color,color:"#fff",border:"none",borderRadius:10,padding:"13px",fontFamily:"sans-serif",fontSize:14,fontWeight:"bold",cursor:"pointer"}}>{children}</button>;}
+function Fld({label,children}){return <div><div style={{fontFamily:"sans-serif",fontSize:11,fontWeight:"bold",color:"#757575",letterSpacing:.5,textTransform:"uppercase",marginBottom:4}}>{label}</div>{children}</div>;}
+
+function TRow({task,users,onOpen,showAssignee,highlight}){
   const assignee=users.find(u=>u.id===task.assignedTo);
   return <button onClick={()=>onOpen(task.id)} style={{width:"100%",background:highlight?"#F3E5F5":"#fff",border:"1px solid #E0E0E0",borderLeft:`4px solid ${PRIO_COLOR[task.priority]||"#9E9E9E"}`,borderRadius:10,padding:"10px 12px",marginBottom:7,textAlign:"left",cursor:"pointer",display:"block"}}>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
       <div style={{fontFamily:"sans-serif",fontSize:14,fontWeight:"bold",color:"#1A1A1A",flex:1,marginRight:6}}>{task.title}</div>
-      <span style={{background:STATUS_COLOR[task.status]||"#555",color:"#fff",borderRadius:7,padding:"2px 7px",fontSize:10,fontFamily:"sans-serif",flexShrink:0,whiteSpace:"nowrap"}}>{task.status}</span>
+      <span style={{background:STATUS_COLOR[task.status]||"#9E9E9E",color:"#fff",borderRadius:7,padding:"2px 7px",fontSize:10,fontFamily:"sans-serif",flexShrink:0,whiteSpace:"nowrap"}}>{task.status}</span>
     </div>
     <div style={{fontFamily:"sans-serif",fontSize:11,color:"#757575",marginTop:3,display:"flex",gap:8,flexWrap:"wrap"}}>
       {showAssignee&&assignee&&<span>{ROLES[assignee.role]?.icon} {assignee.name}</span>}
-      {task.photos.length>0&&<span>📷 {task.photos.length}</span>}
+      {task.type&&<span>🏷 {task.type}</span>}
+      {task.photos?.length>0&&<span>📷 {task.photos.length}</span>}
     </div>
   </button>;
 }
-function AIResult({r}){
-  const c=r.priorite==="Urgente"?"#C62828":r.priorite==="Haute"?"#E65100":"#2E7D32";
-  return <div style={{background:r.anomalies.length>0?"#FFF8E1":"#E8F5E9",borderRadius:8,padding:"9px 10px",marginBottom:8,border:`1px solid ${c}40`}}>
-    <div style={{fontFamily:"sans-serif",fontSize:12,fontWeight:"bold",color:c,marginBottom:3}}>IA — {r.priorite} — {r.resume}</div>
-    {r.anomalies.map((a,i)=><div key={i} style={{fontFamily:"sans-serif",fontSize:12,color:"#424242"}}>• {a}</div>)}
-    {r.action&&<div style={{fontFamily:"sans-serif",fontSize:12,color:"#1565C0",marginTop:4}}>👉 {r.action}</div>}
-  </div>;
-}
-function F({label,children}){return <div><div style={{fontFamily:"sans-serif",fontSize:11,fontWeight:"bold",color:"#757575",letterSpacing:.5,textTransform:"uppercase",marginBottom:4}}>{label}</div>{children}</div>;}
-function BottomNav({screen,me,role,toValidate,myTasks,onNav}){
+
+function BottomNav({screen,role,toValidate,myTasks,onNav}){
   const items=[
-    {id:"home",icon:"🏠",label:"Accueil"},
-    {id:"mytasks",icon:"✅",label:"Mes tâches",badge:myTasks},
-    ...(role.canValidate?[{id:"validate",icon:"🔍",label:"Valider",badge:toValidate}]:[]),
-    ...(role.canCreate?[{id:"new",icon:"➕",label:"Créer"}]:[]),
+    {id:"home",    icon:"🏠", label:"Accueil"},
+    {id:"mytasks", icon:"✅", label:"Mes tâches", badge:myTasks},
+    ...(role.canValidate ?[{id:"validate",icon:"🔍",label:"Valider",badge:toValidate}]:[]),
+    ...(role.canCreate   ?[{id:"new",     icon:"➕",label:"Créer"}]:[]),
+    ...(role.seeAll      ?[{id:"all",     icon:"📋",label:"Toutes"}]:[]),
     ...(role.canManageUsers?[{id:"people",icon:"👥",label:"Équipe"}]:[]),
-    {id:"profile",icon:"👤",label:"Profil"},
+    {id:"profile", icon:"👤", label:"Profil"},
   ];
-  return <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:480,background:"#fff",borderTop:"1px solid #E0E0E0",display:"flex",zIndex:10}}>
+  return <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:480,background:"#fff",borderTop:"1px solid #E0E0E0",display:"flex",zIndex:20}}>
     {items.map(n=>(
       <button key={n.id} onClick={()=>onNav(n.id)} style={{flex:1,border:"none",background:"none",padding:"7px 0",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:1,position:"relative"}}>
         <span style={{fontSize:18}}>{n.icon}</span>
         <span style={{fontFamily:"sans-serif",fontSize:9,color:screen===n.id?"#2E7D32":"#9E9E9E",fontWeight:screen===n.id?"bold":"normal"}}>{n.label}</span>
-        {n.badge>0&&<div style={{position:"absolute",top:4,right:"15%",background:"#C62828",color:"#fff",borderRadius:8,padding:"1px 5px",fontSize:9,fontFamily:"sans-serif",fontWeight:"bold"}}>{n.badge}</div>}
+        {n.badge>0&&<div style={{position:"absolute",top:3,right:"10%",background:"#C62828",color:"#fff",borderRadius:8,padding:"1px 5px",fontSize:9,fontFamily:"sans-serif",fontWeight:"bold"}}>{n.badge}</div>}
       </button>
     ))}
   </div>;
 }
+
 const IS={width:"100%",border:"1px solid #ddd",borderRadius:8,padding:"9px 10px",fontSize:14,fontFamily:"sans-serif",boxSizing:"border-box",background:"#FAFAFA"};
