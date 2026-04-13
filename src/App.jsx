@@ -463,7 +463,7 @@ function NewTask({me,role,users,zones,taskTypes,onSave,onBack}){
         <Fld label="Type de tâche">
           <select value={type} onChange={e=>setType(e.target.value)} style={IS}>
             <option value="">-- Choisir --</option>
-            {TASK_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
+            {taskTypes.map(t=><option key={t} value={t}>{t}</option>)}
           </select>
         </Fld>
         <Fld label="Zone *">
