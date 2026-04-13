@@ -40,7 +40,7 @@ const ROLES = {
 };
 
 const WORKFLOW    = ["À faire","En cours","À valider","Validée","Renvoyée"];
-const TASK_TYPES  = ["Entretien","Voitures","Relevés","Livraison","Terrasse","Électricité","Plomberie","Béton","Taille","Peinture","Lumière","Linge","Dalle","Nettoyage ext.","Fuite","Électroménager","Calage","Sortie d'hivernage","Technique","Clim","Ménage","Hivernage","Autre"];
+const DEFAULT_TASK_TYPES = ["Entretien","Voitures","Relevés","Livraison","Terrasse","Électricité","Plomberie","Béton","Taille","Peinture","Lumière","Linge","Dalle","Nettoyage ext.","Fuite","Électroménager","Calage","Sortie d'hivernage","Technique","Clim","Ménage","Hivernage","Autre"];
 const PRIO_COLOR  = {Urgente:"#C62828",Haute:"#E65100",Normale:"#1565C0",Basse:"#5D4037"};
 const STATUS_COLOR= {"À faire":"#F57F17","En cours":"#1565C0","À valider":"#6A1B9A","Validée":"#2E7D32","Renvoyée":"#C62828"};
 const RECURRENCE  = [{v:"",l:"Aucune"},{v:"daily",l:"Tous les jours"},{v:"weekly",l:"Chaque semaine"},{v:"monthly",l:"Chaque mois"},{v:"yearly",l:"Chaque année"}];
@@ -110,6 +110,7 @@ async function analyzePhoto(b64,zoneName){
 export default function App(){
   const [users,setUsers]=useState([]);
   const [tasks,setTasks]=useState([]);
+  const [taskTypes,setTaskTypes]=useState(DEFAULT_TASK_TYPES);
   const [me,setMe]=useState(null);
   const [ready,setReady]=useState(false);
   const [screen,setScreen]=useState("login");
@@ -119,8 +120,10 @@ export default function App(){
     (async()=>{
       let u=await db.get("users_v1");
       let t=await db.get("tasks_v1");
+      let tt=await db.get("tasktypes_v1");
       if(!u){u=[{id:"u0",name:"Céline",role:"direction",pin:""}];await db.set("users_v1",u);}
       setUsers(u);
+      if(tt) setTaskTypes(tt);
       if(t){
         // Créer les occurrences récurrentes si échues
         t=spawnRecurring(t);
@@ -154,6 +157,7 @@ export default function App(){
   }
 
   const saveUsers=async u=>{setUsers(u);await db.set("users_v1",u);};
+  const saveTaskTypes=async tt=>{setTaskTypes(tt);await db.set("tasktypes_v1",tt);};
   const saveTasks=async(t,newT)=>{
     setTasks(t);await db.set("tasks_v1",t);
     if(newT){const who=users.find(u=>u.id===newT.assignedTo)?.name||"vous";notif("🏕️ Nouvelle tâche",`${newT.title} — ${who}`);}
@@ -187,13 +191,14 @@ export default function App(){
       {screen==="mytasks"  &&<MyTasks me={me} role={role} tasks={myTasks} users={users} onOpen={openTask} onBack={()=>setScreen("home")}/>}
       {screen==="all"      &&role.seeAll&&<AllTasks me={me} role={role} tasks={tasks} users={users} onOpen={openTask} onBack={()=>setScreen("home")} onMove={role.canManageUsers?moveTask:null}/>}
       {screen==="validate" &&role.canValidate&&<ToValidate tasks={toValidate} users={users} onOpen={openTask} onBack={()=>setScreen("home")}/>}
-      {screen==="new"      &&<NewTask me={me} role={role} users={users} zones={ZONES_DEFAULT} onSave={async t=>{await saveTasks([t,...tasks],t);setScreen("home");}} onBack={()=>setScreen("home")}/>}
+      {screen==="new"      &&<NewTask me={me} role={role} users={users} zones={ZONES_DEFAULT} taskTypes={taskTypes} onSave={async t=>{await saveTasks([t,...tasks],t);setScreen("home");}} onBack={()=>setScreen("home")}/>}
+      {screen==="tasktypes"&&role.canManageUsers&&<TaskTypesManager taskTypes={taskTypes} onSave={saveTaskTypes} onBack={()=>setScreen("home")}/>}
       {screen==="task"&&currentTask&&
-        <TaskDetail task={currentTask} me={me} role={role} users={users} zones={ZONES_DEFAULT}
+        <TaskDetail task={currentTask} me={me} role={role} users={users} zones={ZONES_DEFAULT} taskTypes={taskTypes}
           onSave={async t=>await saveTasks(tasks.map(x=>x.id===t.id?t:x))}
           onDelete={async()=>{await saveTasks(tasks.filter(x=>x.id!==currentTask.id));setScreen("home");}}
           onBack={()=>setScreen("home")}/>}
-      {screen==="people"&&role.canManageUsers&&<People me={me} users={users} onSave={saveUsers} onBack={()=>setScreen("home")}/>}
+      {screen==="people"&&role.canManageUsers&&<People me={me} users={users} onSave={saveUsers} onBack={()=>setScreen("home")} onNavTypes={()=>setScreen("tasktypes")}/>}
       {screen==="profile"&&<Profile me={me} onLogout={()=>{setMe(null);setScreen("login");}} onBack={()=>setScreen("home")}/>}
       <BottomNav screen={screen} role={role} toValidate={toValidate.length} myTasks={myTasks.filter(t=>t.status!=="Validée").length} onNav={setScreen}/>
     </Shell>
@@ -427,7 +432,7 @@ function ToValidate({tasks,users,onOpen,onBack}){
 }
 
 // ─── NEW TASK ─────────────────────────────────────────────────
-function NewTask({me,role,users,zones,onSave,onBack}){
+function NewTask({me,role,users,zones,taskTypes,onSave,onBack}){
   const [title,setTitle]=useState("");
   const [type,setType]=useState("");
   const [zoneId,setZoneId]=useState("");
@@ -501,7 +506,7 @@ function NewTask({me,role,users,zones,onSave,onBack}){
 }
 
 // ─── TASK DETAIL ──────────────────────────────────────────────
-function TaskDetail({task,me,role,users,zones,onSave,onDelete,onBack}){
+function TaskDetail({task,me,role,users,zones,taskTypes,onSave,onDelete,onBack}){
   const zone=zones.find(z=>z.id===task.zoneId);
   const assignee=users.find(u=>u.id===task.assignedTo);
   const isMe=task.assignedTo===me.id;
@@ -692,7 +697,7 @@ function TaskDetail({task,me,role,users,zones,onSave,onDelete,onBack}){
 }
 
 // ─── PEOPLE ───────────────────────────────────────────────────
-function People({me,users,onSave,onBack}){
+function People({me,users,onSave,onBack,onNavTypes}){
   const [adding,setAdding]=useState(false);
   const [editPin,setEditPin]=useState(null);
   const [newPin,setNewPin]=useState("");
@@ -726,6 +731,7 @@ function People({me,users,onSave,onBack}){
             </div>}
           </div>);})}
         {!adding&&<button onClick={()=>setAdding(true)} style={{background:"#F1F8F1",border:"1.5px dashed #2E7D32",borderRadius:12,padding:"14px",color:"#2E7D32",fontFamily:"sans-serif",fontSize:14,fontWeight:"bold",cursor:"pointer"}}>+ Ajouter un utilisateur</button>}
+        <button onClick={()=>onNavTypes()} style={{background:"#E3F2FD",border:"1.5px solid #1565C0",borderRadius:12,padding:"14px",color:"#1565C0",fontFamily:"sans-serif",fontSize:14,fontWeight:"bold",cursor:"pointer"}}>🏷 Gérer les types de tâches</button>
         {adding&&<Card title="Nouvel utilisateur">
           <Fld label="Prénom"><input value={name} onChange={e=>setName(e.target.value)} placeholder="Prénom" style={IS}/></Fld>
           <div style={{height:8}}/>
@@ -741,6 +747,41 @@ function People({me,users,onSave,onBack}){
       </div>
     </div>
   );
+}
+
+// ─── TASK TYPES MANAGER ──────────────────────────────────────
+function TaskTypesManager({taskTypes,onSave,onBack}){
+  const [types,setTypes]=useState([...taskTypes]);
+  const [newType,setNewType]=useState("");
+  const add=()=>{const t=newType.trim();if(!t||types.includes(t))return;setTypes([...types,t]);setNewType("");};
+  const remove=t=>{if(!confirm(`Supprimer "${t}" ?`))return;setTypes(types.filter(x=>x!==t));};
+  const moveUp=i=>{if(i===0)return;const arr=[...types];[arr[i-1],arr[i]]=[arr[i],arr[i-1]];setTypes(arr);};
+  const moveDown=i=>{if(i===types.length-1)return;const arr=[...types];[arr[i],arr[i+1]]=[arr[i+1],arr[i]];setTypes(arr);};
+  const save=()=>{onSave(types);onBack();};
+  return<div>
+    <TopBar title="🏷 Types de tâches" onBack={onBack}/>
+    <div style={{padding:"12px",display:"flex",flexDirection:"column",gap:10}}>
+      <Card title="Ajouter un type">
+        <div style={{display:"flex",gap:8}}>
+          <input value={newType} onChange={e=>setNewType(e.target.value)} placeholder="Ex: Inspection, Sécurité…" style={{...IS,flex:1}} onKeyDown={e=>e.key==="Enter"&&add()}/>
+          <button onClick={add} style={{background:"#2E7D32",color:"#fff",border:"none",borderRadius:8,padding:"8px 14px",fontFamily:"sans-serif",fontWeight:"bold",cursor:"pointer"}}>+</button>
+        </div>
+      </Card>
+      <Card title={`Types (${types.length})`}>
+        {types.map((t,i)=>(
+          <div key={t} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 0",borderBottom:"1px solid #F0F0F0"}}>
+            <div style={{display:"flex",flexDirection:"column",gap:2,flexShrink:0}}>
+              <button onClick={()=>moveUp(i)} disabled={i===0} style={{background:i===0?"#F5F5F5":"#E8F5E9",border:"none",borderRadius:4,padding:"2px 6px",cursor:i===0?"default":"pointer",color:i===0?"#BDBDBD":"#2E7D32",fontSize:11}}>▲</button>
+              <button onClick={()=>moveDown(i)} disabled={i===types.length-1} style={{background:i===types.length-1?"#F5F5F5":"#E8F5E9",border:"none",borderRadius:4,padding:"2px 6px",cursor:i===types.length-1?"default":"pointer",color:i===types.length-1?"#BDBDBD":"#2E7D32",fontSize:11}}>▼</button>
+            </div>
+            <div style={{flex:1,fontFamily:"sans-serif",fontSize:14,color:"#1A1A1A"}}>{t}</div>
+            <button onClick={()=>remove(t)} style={{background:"#FFEBEE",border:"none",borderRadius:6,padding:"4px 8px",color:"#C62828",fontFamily:"sans-serif",fontSize:11,fontWeight:"bold",cursor:"pointer"}}>✕</button>
+          </div>
+        ))}
+      </Card>
+      <button onClick={save} style={{background:"#2E7D32",color:"#fff",border:"none",borderRadius:10,padding:"14px",fontFamily:"sans-serif",fontSize:15,fontWeight:"bold",cursor:"pointer"}}>💾 Enregistrer</button>
+    </div>
+  </div>;
 }
 
 // ─── PROFILE ──────────────────────────────────────────────────
