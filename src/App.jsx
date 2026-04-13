@@ -61,6 +61,16 @@ const TASK_TYPES = ["Entretien","Voitures","Relevés","Livraison","Terrasse","É
 const PRIO_COLOR = {Urgente:"#C62828",Haute:"#E65100",Normale:"#1565C0",Basse:"#5D4037"};
 const STATUS_COLOR = {"À faire":"#F57F17","En cours":"#1565C0","À valider":"#6A1B9A","Validée":"#2E7D32","Renvoyée":"#C62828"};
 
+// ─── NOTIFICATIONS ────────────────────────────────────────────
+function requestNotifPermission(){ 
+  if("Notification" in window && Notification.permission==="default") 
+    Notification.requestPermission(); 
+}
+function sendNotif(title, body){ 
+  if("Notification" in window && Notification.permission==="granted")
+    new Notification(title, {body, icon:"🏕️"}); 
+}
+
 // ─── STORAGE ──────────────────────────────────────────────────
 const db = {
   async get(k){
@@ -129,7 +139,11 @@ export default function App(){
   },[]);
 
   const saveUsers = async(u)=>{ setUsers(u); await db.set("users_v1",u); };
-  const saveTasks = async(t)=>{ setTasks(t); await db.set("tasks_v1",t); };
+  const saveTasks = async(t,newTask)=>{ 
+    setTasks(t); 
+    await db.set("tasks_v1",t); 
+    if(newTask) sendNotif("🏕️ Nouvelle tâche", `${newTask.title} — assignée à ${users.find(u=>u.id===newTask.assignedTo)?.name||"vous"}`);
+  };
 
   const openTask = (id)=>{ setTaskId(id); setScreen("task"); };
 
@@ -147,7 +161,7 @@ export default function App(){
       {screen==="mytasks" && <MyTasks me={me} role={role} tasks={myTasks} users={users} onOpen={openTask} onBack={()=>setScreen("home")} />}
       {screen==="all"     && <AllTasks me={me} role={role} tasks={tasks} users={users} zones={ZONES_DEFAULT} onOpen={openTask} onBack={()=>setScreen("home")} />}
       {screen==="validate"&& <ToValidate me={me} tasks={toValidate} users={users} zones={ZONES_DEFAULT} onOpen={openTask} onBack={()=>setScreen("home")} />}
-      {screen==="new"     && <NewTask me={me} role={role} users={users} zones={ZONES_DEFAULT} onSave={async(t)=>{const u=[t,...tasks];await saveTasks(u);setScreen("home");}} onBack={()=>setScreen("home")} />}
+      {screen==="new"     && <NewTask me={me} role={role} users={users} zones={ZONES_DEFAULT} onSave={async(t)=>{const u=[t,...tasks];await saveTasks(u,t);setScreen("home");}} onBack={()=>setScreen("home")} />}
       {screen==="task" && currentTask && <TaskDetail task={currentTask} me={me} role={role} users={users} zones={ZONES_DEFAULT} onSave={async(t)=>{const u=tasks.map(x=>x.id===t.id?t:x);await saveTasks(u);}} onDelete={async()=>{const u=tasks.filter(x=>x.id!==currentTask.id);await saveTasks(u);setScreen("home");}} onBack={()=>setScreen("home")} />}
       {screen==="people"  && <People me={me} role={role} users={users} onSave={saveUsers} onBack={()=>setScreen("home")} />}
       {screen==="profile" && <Profile me={me} onLogout={()=>setMe(null)} onBack={()=>setScreen("home")} />}
@@ -174,6 +188,7 @@ function Login({users,onLogin}){
   const [err,setErr]=useState("");
 
   const choose=(u)=>{
+    requestNotifPermission();
     if(!u.pin){onLogin(u);return;}  // Pas de PIN → connexion directe
     setSelected(u);
     setPin("");setErr("");
@@ -365,12 +380,12 @@ function NewTask({me,role,users,zones,onSave,onBack}){
           ))}
         </div>
       </F>
-      {role.canReassign&&<F label="Assigné à">
+      <F label="Assigné à">
         <select value={assignedTo} onChange={e=>setAssignedTo(e.target.value)} style={IS}>
           <option value="">-- Moi-même --</option>
           {users.map(u=><option key={u.id} value={u.id}>{ROLES[u.role]?.icon} {u.name} ({ROLES[u.role]?.label})</option>)}
         </select>
-      </F>}
+      </F>
       <F label="Description"><textarea value={desc} onChange={e=>setDesc(e.target.value)} rows={3} placeholder="Contexte, détails…" style={{...IS,resize:"vertical"}} /></F>
       <button onClick={save} disabled={!title||!zoneId} style={{background:title&&zoneId?"#2E7D32":"#BDBDBD",color:"#fff",border:"none",borderRadius:10,padding:"14px",fontFamily:"sans-serif",fontSize:15,fontWeight:"bold",cursor:title&&zoneId?"pointer":"default"}}>Créer</button>
     </div>
@@ -387,6 +402,8 @@ function TaskDetail({task,me,role,users,zones,onSave,onDelete,onBack}){
   const [aiResult,setAiResult]=useState(null);
   const [localPhotos,setLocalPhotos]=useState(task.photos||[]);
   const fileRef=useRef();
+  // Sync localPhotos when task.photos changes (after save/reload)
+  useEffect(()=>{ setLocalPhotos(task.photos||[]); },[task.id, task.photos?.length]);
   const assignee=users.find(u=>u.id===task.assignedTo);
   const creator=users.find(u=>u.id===task.createdBy);
   const isMe=task.assignedTo===me.id;
@@ -565,8 +582,8 @@ function TaskDetail({task,me,role,users,zones,onSave,onDelete,onBack}){
         })}
       </Card>
 
-      {/* Supprimer */}
-      {(role.canCreate||role.canManageUsers)&&<button onClick={()=>{if(confirm("Supprimer ?"))onDelete();}} style={{background:"#fff",color:"#C62828",border:"1.5px solid #C62828",borderRadius:10,padding:"12px",fontFamily:"sans-serif",fontSize:13,cursor:"pointer"}}>Supprimer la tâche</button>}
+      {/* Supprimer — Direction uniquement */}
+      {role.canManageUsers&&<button onClick={()=>{if(confirm("Supprimer cette tâche définitivement ?"))onDelete();}} style={{background:"#fff",color:"#C62828",border:"1.5px solid #C62828",borderRadius:10,padding:"12px",fontFamily:"sans-serif",fontSize:13,cursor:"pointer"}}>🗑 Supprimer la tâche (Direction)</button>}
     </div>
   </div>;
 }
@@ -574,6 +591,8 @@ function TaskDetail({task,me,role,users,zones,onSave,onDelete,onBack}){
 // ─── PEOPLE ───────────────────────────────────────────────────
 function People({me,role,users,onSave,onBack}){
   const [adding,setAdding]=useState(false);
+  const [editingPin,setEditingPin]=useState(null); // user id being edited
+  const [newPin,setNewPin]=useState("");
   const [name,setName]=useState("");
   const [userRole,setUserRole]=useState("menage");
   const [pin,setPin]=useState("");
@@ -587,19 +606,33 @@ function People({me,role,users,onSave,onBack}){
     if(id===me.id)return;
     if(confirm("Supprimer cet utilisateur ?")) onSave(users.filter(u=>u.id!==id));
   };
+  const savePin=(id)=>{
+    const u=users.map(x=>x.id===id?{...x,pin:newPin}:x);
+    onSave(u);setEditingPin(null);setNewPin("");
+  };
 
   return <div>
     <TopBar title="Utilisateurs" onBack={onBack} />
     <div style={{padding:"12px",display:"flex",flexDirection:"column",gap:10}}>
       {users.map(u=>{
         const r=ROLES[u.role];
-        return <div key={u.id} style={{background:"#fff",border:"1px solid #E0E0E0",borderRadius:12,padding:"12px 14px",display:"flex",alignItems:"center",gap:10}}>
-          <div style={{width:40,height:40,borderRadius:"50%",background:r?.color||"#9E9E9E",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{r?.icon}</div>
-          <div style={{flex:1}}>
-            <div style={{fontFamily:"sans-serif",fontSize:14,fontWeight:"bold",color:"#1A1A1A"}}>{u.name}{u.id===me.id?" (moi)":""}</div>
-            <div style={{fontFamily:"sans-serif",fontSize:12,color:"#9E9E9E"}}>{r?.label}</div>
+        return <div key={u.id} style={{background:"#fff",border:"1px solid #E0E0E0",borderRadius:12,padding:"12px 14px"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <div style={{width:40,height:40,borderRadius:"50%",background:r?.color||"#9E9E9E",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{r?.icon}</div>
+            <div style={{flex:1}}>
+              <div style={{fontFamily:"sans-serif",fontSize:14,fontWeight:"bold",color:"#1A1A1A"}}>{u.name}{u.id===me.id?" (moi)":""}</div>
+              <div style={{fontFamily:"sans-serif",fontSize:12,color:"#9E9E9E"}}>{r?.label} · PIN : {u.pin?u.pin.replace(/./g,"●"):"aucun"}</div>
+            </div>
+            <div style={{display:"flex",gap:6}}>
+              <button onClick={()=>{setEditingPin(editingPin===u.id?null:u.id);setNewPin(u.pin||"");}} style={{background:"#E3F2FD",border:"none",borderRadius:6,padding:"5px 10px",color:"#1565C0",fontFamily:"sans-serif",fontSize:11,cursor:"pointer",fontWeight:"bold"}}>🔑 PIN</button>
+              {u.id!==me.id&&<button onClick={()=>remove(u.id)} style={{background:"#FFEBEE",border:"none",borderRadius:6,padding:"5px 8px",color:"#C62828",fontSize:14,cursor:"pointer"}}>×</button>}
+            </div>
           </div>
-          {u.id!==me.id&&<button onClick={()=>remove(u.id)} style={{background:"none",border:"none",color:"#C62828",fontSize:18,cursor:"pointer"}}>×</button>}
+          {editingPin===u.id&&<div style={{marginTop:10,display:"flex",gap:8,alignItems:"center"}}>
+            <input value={newPin} onChange={e=>setNewPin(e.target.value)} placeholder="Nouveau PIN (laisser vide = sans PIN)" maxLength={6} inputMode="numeric" style={{...IS,flex:1}} />
+            <button onClick={()=>savePin(u.id)} style={{background:"#2E7D32",color:"#fff",border:"none",borderRadius:8,padding:"9px 14px",fontFamily:"sans-serif",fontSize:13,cursor:"pointer",fontWeight:"bold"}}>OK</button>
+            <button onClick={()=>setEditingPin(null)} style={{background:"#fff",color:"#9E9E9E",border:"1px solid #ddd",borderRadius:8,padding:"9px 10px",fontFamily:"sans-serif",fontSize:12,cursor:"pointer"}}>✕</button>
+          </div>}
         </div>;
       })}
       {!adding&&<button onClick={()=>setAdding(true)} style={{background:"#F1F8F1",border:"1.5px dashed #2E7D32",borderRadius:12,padding:"13px",color:"#2E7D32",fontFamily:"sans-serif",fontSize:14,fontWeight:"bold",cursor:"pointer"}}>+ Ajouter un utilisateur</button>}
