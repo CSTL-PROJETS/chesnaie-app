@@ -630,7 +630,7 @@ function TaskDetail({task,me,role,users,zones,taskTypes,onSave,onDelete,onBack})
           <div style={{display:"flex",gap:8}}>
             <select value={reassignTo} onChange={e=>setReassignTo(e.target.value)} style={{...IS,flex:1}}>
               <option value="">-- Choisir --</option>
-              {users.filter(u=>u.id!==task.assignedTo).map(u=><option key={u.id} value={u.id}>{ROLES[u.role]?.icon} {u.name}</option>)}
+              {users.map(u=><option key={u.id} value={u.id}>{ROLES[u.role]?.icon} {u.name}</option>)}
             </select>
             <button onClick={reassign} disabled={!reassignTo} style={{background:reassignTo?"#2E7D32":"#BDBDBD",color:"#fff",border:"none",borderRadius:8,padding:"8px 14px",fontFamily:"sans-serif",fontWeight:"bold",cursor:reassignTo?"pointer":"default"}}>OK</button>
           </div>
