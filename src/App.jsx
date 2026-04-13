@@ -40,7 +40,7 @@ const ROLES = {
 };
 
 const WORKFLOW    = ["À faire","En cours","À valider","Validée","Renvoyée"];
-const DEFAULT_TASK_TYPES = ["Entretien","Voitures","Relevés","Livraison","Terrasse","Électricité","Plomberie","Béton","Taille","Peinture","Lumière","Linge","Dalle","Nettoyage ext.","Fuite","Électroménager","Calage","Sortie d'hivernage","Technique","Clim","Ménage","Hivernage","Autre"];
+const DEFAULT_TASK_TYPES = ["Ménage","Technique","Administratif","Communication","Commercial","Tarif","Référencement","Entretien","Voitures","Relevés","Livraison","Terrasse","Électricité","Plomberie","Béton","Taille haie et tonte","Taille","Peinture","Lumière","Linge","Dalle","Nettoyage ext.","Fuite","Électroménager","Calage","Sortie d'hivernage","Clim","Hivernage","Autre"];
 const PRIO_COLOR  = {Urgente:"#C62828",Haute:"#E65100",Normale:"#1565C0",Basse:"#5D4037"};
 const STATUS_COLOR= {"À faire":"#F57F17","En cours":"#1565C0","À valider":"#6A1B9A","Validée":"#2E7D32","Renvoyée":"#C62828"};
 const RECURRENCE  = [{v:"",l:"Aucune"},{v:"daily",l:"Tous les jours"},{v:"weekly",l:"Chaque semaine"},{v:"monthly",l:"Chaque mois"},{v:"yearly",l:"Chaque année"}];
